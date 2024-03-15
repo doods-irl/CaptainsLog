@@ -1,77 +1,42 @@
 {
   "categories": [
     {
-      "name": "hello",
-      "logs": [
-        {
-          "id": 1,
-          "content": "new note",
-          "status": "active"
-        }
-      ]
-    },
-    {
-      "name": "game",
-      "logs": [
-        {
-          "id": 1,
-          "content": "skjdlaksdj",
-          "status": "active"
-        }
-      ]
-    },
-    {
-      "name": "newcat",
-      "logs": [
-        {
-          "id": 1,
-          "content": "asdlk;aksd",
-          "status": "active"
-        },
-        {
-          "id": 2,
-          "content": "ksdjlasd",
-          "status": "active"
-        },
-        {
-          "id": 3,
-          "content": "asdads",
-          "status": "active"
-        },
-        {
-          "id": 4,
-          "content": "asl;dk;asd",
-          "status": "active"
-        },
-        {
-          "id": 5,
-          "content": "asss",
-          "status": "active"
-        },
-        {
-          "id": 6,
-          "content": "s;lds;ald",
-          "status": "active"
-        }
-      ]
-    },
-    {
       "name": "notes",
       "logs": [
         {
           "id": 1,
-          "content": ";dlfkg;dgfk",
-          "status": "active"
-        }
-      ]
-    },
-    {
-      "name": "spacegame",
-      "logs": [
+          "content": "hello",
+          "status": "deleted"
+        },
         {
-          "id": 1,
-          "content": "Fix bugs",
-          "status": "active"
+          "id": 2,
+          "content": "#delete",
+          "status": "deleted"
+        },
+        {
+          "id": 3,
+          "content": "Hello",
+          "status": "deleted"
+        },
+        {
+          "id": 4,
+          "content": "hello",
+          "status": "deleted"
+        },
+        {
+          "id": 5,
+          "content": "#delete",
+          "status": "deleted"
+        },
+        {
+          "id": 6,
+          "content": "#empty",
+          "status": "deleted"
+        },
+        {
+          "id": 7,
+          "content": "Notes",
+          "status": "deleted"
         }
       ]
     }
