@@ -5,18 +5,46 @@ const {
   ipcMain,
   screen,
   dialog,
+  Menu,
+  Tray,
 } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
 let setupWin;
+let tutorialWin;
 let win;
 let miniHeight = 90;
 let bigHeight = 800;
 let configPath;
 let filePath;
+let tray = null;
 
 app.on("ready", () => {
+  tray = new Tray(path.join(__dirname, 'favicon.ico'));
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Mini Editor',
+      click: () => { showMiniEditor(); }
+    },
+    {
+      label: 'Big Editor',
+      click: () => { showBigEditor(); }
+    },
+    {
+      label: 'Tutorial',
+      click: () => { createTutorialWindow(); }
+    },
+    {
+      label: 'Close',
+      click: () => { app.quit(); }
+    }
+  ]);
+
+  tray.setToolTip(`Captain's Log`);
+  tray.setContextMenu(contextMenu);
+
   let setupComplete = checkSetupComplete(); 
 
   if (setupComplete) {
@@ -56,13 +84,12 @@ function createWindow() {
     win.webContents.executeJavaScript("clearText()");
     win.webContents.executeJavaScript("showAllCategories()");
     win.hide();
-  });
-
-  win.on("hide", () => {
     win.setResizable(true);
     win.setSize(800, 70);
     win.setResizable(false);
   });
+
+  tray.on('click', () => showBigEditor());
 }
 
 function createSetupWindow() {
@@ -80,6 +107,25 @@ function createSetupWindow() {
   setupWin.loadFile("public/setup.html");
 }
 
+function createTutorialWindow() {
+  tutorialWin = new BrowserWindow({
+    width: 800,
+    height: 800,
+    frame: false,
+    resizable: false,
+    webPreferences: {
+      contextIsolation: true,
+      devTools: false,
+    },
+  });
+  tutorialWin.loadFile("public/tutorial.html");
+  tutorialWin.show();
+
+  tutorialWin.on("blur", () => {
+    win.hide();
+  });
+}
+
 function checkSetupComplete() {
   const userDataPath = app.getPath("userData");
   configPath = path.join(userDataPath, "config.json");
@@ -87,7 +133,6 @@ function checkSetupComplete() {
   if (fs.existsSync(configPath)) {
     try {
       const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-      console.log(config.filePath);
       filePath = config.filePath;
       return true;
     } catch (error) {
@@ -99,7 +144,6 @@ function checkSetupComplete() {
 }
 
 ipcMain.on("open-file-dialog", async (event) => {
-  console.log("Opening file dialog");
   const { filePaths } = await dialog.showOpenDialog({
     properties: ["openDirectory"],
   });
@@ -116,24 +160,25 @@ ipcMain.on("receive-setup-path", (event, receivedPath) => {
       console.error("Error writing config file:", err);
       return;
     }
-    console.log("Config file updated with path:", filePath);
 
-    
     if (setupWin) {
       setupWin.close();
       createWindow();
+      createTutorialWindow();
     }
   });
 });
 
 function registerShortcuts() {
-  const miniEditorShortcut = "CommandOrControl+Alt+K";
-  const bigEditorShortcut = "CommandOrControl+Alt+L";
+  const editorShortcut = "CommandOrControl+Alt+L";
+  const bigEditorShortcut = "CommandOrControl+Alt+K";
   const escapeShortcut = "Escape";
 
-  globalShortcut.register(miniEditorShortcut, () => {
+  globalShortcut.register(editorShortcut, () => {
     if (!win.isVisible()) {
       showMiniEditor();
+    } else if (win.isVisible()) {
+      showBigEditor();
     }
   });
 
@@ -173,7 +218,6 @@ function checkJSON() {
 
 function serveLogs() {
   fs.readFile(filePath, "utf8", (err, data) => {
-    console.log(filePath);
     if (err) {
       console.error("Error reading the file:", err);
       return;
@@ -230,7 +274,6 @@ ipcMain.on("text-submitted", (event, formData) => {
       json.categories.push(categoryObj);
     }
 
-    console.log(content);
     if (content != "") {
       const newLog = {
         id: categoryObj.logs.length + 1, 
@@ -239,12 +282,9 @@ ipcMain.on("text-submitted", (event, formData) => {
       };
       categoryObj.logs.push(newLog);
     }
-    console.log(json);
 
-    
     fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
       if (err) throw err;
-      console.log("Data written to file");
     });
   });
 
@@ -275,10 +315,8 @@ ipcMain.on("modify-log-delete", (event, logDataArray) => {
       }
     });
 
-    
     fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
       if (err) throw err;
-      console.log("Log status updated to deleted");
     });
   });
 });
@@ -309,7 +347,6 @@ ipcMain.on("modify-log-done", (event, logDataArray) => {
     
     fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
       if (err) throw err;
-      console.log("Log status toggled");
     });
   });
 });
@@ -328,7 +365,6 @@ ipcMain.on("modify-category-delete", (event, categoryName) => {
     
     fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
       if (err) throw err;
-      console.log(`Category '${categoryName}' deleted`);
     });
   });
 
@@ -356,7 +392,6 @@ ipcMain.on("modify-category-empty", (event, categoryName) => {
     
     fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
       if (err) throw err;
-      console.log(`Logs in category '${categoryName}' marked as deleted`);
     });
   });
 
@@ -389,10 +424,8 @@ ipcMain.on("modify-category-move", (event, categoryName, position) => {
       
       fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
         if (err) throw err;
-        console.log(`Category '${categoryName}' moved to position ${position}`);
       });
     } else {
-      console.log(`Category '${categoryName}' not found`);
     }
   });
 
