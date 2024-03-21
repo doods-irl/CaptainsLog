@@ -1,3 +1,21 @@
+:root {
+  --theme-color: tomato;
+}
+
+html {
+  --text-color: #000;
+  --background-color: #BBB;
+  --textbox-color: #EEE;
+  --nav-inactive-color: #DDD;
+}
+
+html[data-theme='dark'] {
+  --text-color: #CCC;
+  --background-color: #191919;
+  --textbox-color: #111;
+  --nav-inactive-color: #444;
+}
+
 @font-face {
   font-family: "HKGrotesk";
   src: url("assets/HKGrotesk-Regular.ttf");
@@ -7,7 +25,8 @@ body {
   margin: 0;
   font-family: HKGrotesk;
   font-size: x-large;
-  background-color: #bbb;
+  color: var(--text-color);
+  background-color: var(--background-color);
   overflow: hidden;
 }
 
@@ -18,6 +37,19 @@ body {
   grid-column-gap: 0px;
   grid-row-gap: 0px;
   height: 100%;
+}
+
+#error-message {
+  display: none;
+  position: absolute;
+  background-color: var(--theme-color);
+  color: white;
+  font-size: small;
+  top: 30px;
+  right: 10px;
+  padding: 5px;
+  border-radius: 0 0 3px 3px;
+  font-weight: 600;
 }
 
 #category-container {
@@ -37,15 +69,15 @@ body {
   left: 0;
   right: 0;
   height: 30px;
-  box-shadow: inset 0 -7px 0 tomato;
-  pointer-events: none; /* allows clicks to pass through */
-  z-index: 1; /* ensure it's above the content */
+  box-shadow: inset 0 -7px 0 var(--theme-color);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .nav-element {
-  background-color: #ddd;
+  background-color: var(--nav-inactive-color);
   padding: 3px;
-  margin: 0 0 0 10px;
+  margin: 0 0 0 4px;
   border-radius: 5px 5px 0 0;
   scroll-margin: 10px;
 }
@@ -63,7 +95,7 @@ body {
 }
 
 #textbox {
-  background-color: #eee;
+  background-color: var(--textbox-color);
   width: 100%;
   max-width: 100%;
   height: 100%;
@@ -74,6 +106,7 @@ body {
   font-weight: 1000;
   outline: 0;
   border: 0;
+  color: var(--text-color);
 }
 
 #log-container {
@@ -93,14 +126,19 @@ body {
 }
 
 .log-item {
+  font-family: HKGrotesk;
   font-size: medium;
   font-weight: 600;
-  margin: 7px;
-  padding: 5px 5px;
-  background-color: #ddd;
-  border-radius: 5px;
+  margin: 4px;
+  padding: 3px 5px;
+  background-color: var(--nav-inactive-color);
+  border-radius: 3px;
+  outline: none;
+  border: none;
   overflow-wrap: break-word;
   scroll-margin: 10px;
+  width: -webkit-fill-available;
+  color: var(--text-color);
 }
 
 [data-log-status="deleted"] {
@@ -109,10 +147,11 @@ body {
 
 [data-log-status="done"] {
   text-decoration: line-through;
-  color: #777;
-  background-color: #bbb;
+  color: #777 !important;
+  background-color: unset;
 }
 
 .log-item.selected {
-  background-color: tomato;
+  background-color: var(--theme-color);
+  color: white;
 }

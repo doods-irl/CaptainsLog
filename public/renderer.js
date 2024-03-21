@@ -3,9 +3,12 @@ let currentCategory;
 let currentSelectedLog = null;
 let keysPressed = {};
 let selectedIndex;
+let debounceTimer;
 
 function focusText() {
   const textbox = document.getElementById("textbox");
+  unselectAllLogs();
+  scrollToTopOfLog();
   if (textbox) {
     textbox.focus();
   }
@@ -18,6 +21,11 @@ function clearText() {
   }
 }
 
+function setTheme(accentColor, themeColor) {
+  document.documentElement.style.setProperty("--theme-color", `${accentColor}`);
+  document.documentElement.setAttribute("data-theme", themeColor);
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   window.electronAPI.refreshLogs();
   initialiseForm();
@@ -26,16 +34,18 @@ document.addEventListener("DOMContentLoaded", () => {
 window.addEventListener("keydown", function (event) {
   keysPressed[event.key] = true;
 
-  if (!keysPressed["Shift"] && event.key === "ArrowRight") {
+  if (!keysPressed["Shift"] && !currentSelectedLog && event.key === "ArrowRight") {
     selectNav(1);
-  } else if (!keysPressed["Shift"] && event.key === "ArrowLeft") {
+  } else if (!keysPressed["Shift"] && !currentSelectedLog && event.key === "ArrowLeft") {
     selectNav(-1);
   }
 
   if (event.key === "Backspace") {
     const textbox = document.getElementById("textbox");
-    const categoryWithSubcategoryRegex = /^\/\w+:.+ $/;
-    const categoryWithColonRegex = /^\/\w+:$/;
+
+    const categoryWithSubcategoryRegex = /^\/\w+:([^ ]+)?$/;
+
+    const categoryWithOneWordRegex = /^\/\w+:[^ ]+ $/;
     const categoryRegex = /^\/\w+ $/;
 
     if (textbox.value === "delete:" || textbox.value === "empty:") {
@@ -43,11 +53,14 @@ window.addEventListener("keydown", function (event) {
       showAllCategories();
     }
 
-    if (categoryWithSubcategoryRegex.test(textbox.value)) {
+    if (categoryWithOneWordRegex.test(textbox.value)) {
       textbox.value = textbox.value.substring(
         0,
-        textbox.value.lastIndexOf(":") + 2
+        textbox.value.lastIndexOf(":") + 1
       );
+      setTimeout(() => {
+        selectNav(0);
+      }, 20);
       Array.from(document.getElementsByClassName("nav-element")).forEach(
         (nav) => {
           nav.style.backgroundColor = "";
@@ -55,11 +68,14 @@ window.addEventListener("keydown", function (event) {
         }
       );
     } else if (
-      categoryWithColonRegex.test(textbox.value) ||
+      categoryWithSubcategoryRegex.test(textbox.value) ||
       categoryRegex.test(textbox.value)
     ) {
-      textbox.value = "";
+      textbox.value = textbox.value.replace(/ [^ ]+$/, "");
       showAllCategories();
+      setTimeout(() => {
+        selectNav(0);
+      }, 20);
     }
   }
 
@@ -75,9 +91,11 @@ window.addEventListener("keydown", function (event) {
 
   if (keysPressed["Shift"] && event.key == "Tab") {
     event.preventDefault();
+    focusText();
     selectNav(-1);
   } else if (event.key === "Tab") {
     event.preventDefault();
+    focusText();
     selectNav(1);
   }
 
@@ -90,22 +108,31 @@ window.addEventListener("keydown", function (event) {
   }
 
   if (window.innerHeight > 200) {
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    if (!keysPressed["Shift"] && event.key === "ArrowDown" || !keysPressed["Shift"] && event.key === "ArrowUp") {
       selectLog(event.key === "ArrowDown");
-    } else if (event.key === "Enter" && currentSelectedLog) {
+    } else if (keysPressed["Shift"] && event.key === "ArrowUp") {
+      focusText();
+    } else if (keysPressed["Shift"] && event.key === "ArrowDown") {
+      selectBoundingLog(false);
+    }else if (keysPressed["Shift"] && event.key === "Enter" && currentSelectedLog) {
       markDone();
-    } else if (event.key === "Delete" && currentSelectedLog) {
+    } else if (keysPressed["Shift"] && event.key === "Delete" && currentSelectedLog) {
       deleteLog();
     }
   }
 
   if (event.key === " ") {
     const textbox = document.getElementById("textbox");
-    const categoryRegex = /^\/(\w+)$/;
+    const categoryRegex = /^\/(\w+)(?::(\w+))?$/;
     const match = categoryRegex.exec(textbox.value);
 
-    if (match && match[1]) {
-      const potentialCategory = match[1];
+    if (match) {
+      let potentialCategory = match[1];
+
+      if (match[2]) {
+        potentialCategory += ":" + match[2];
+      }
+
       const isCategory = categories.some(
         (category) => category.name === potentialCategory
       );
@@ -201,13 +228,17 @@ function renderLogs(logs) {
           logItem.remove();
         }
 
-        logItem = document.createElement("p");
-        logItem.textContent = log.content;
+        logItem = document.createElement("input");
+        logItem.type = 'text';
+        logItem.value = log.content;
         logItem.id = `${lcCategory}-log-${log.id}`;
         logItem.classList.add("log-item");
         logItem.setAttribute("data-category", lcCategory);
         logItem.setAttribute("data-log-id", log.id);
         logItem.setAttribute("data-log-status", log.status);
+        if(log.status == 'done') {
+          logItem.disabled = true;
+        }
         categoryLogsContainer.appendChild(logItem);
       });
     }
@@ -242,7 +273,7 @@ function initialiseForm() {
     const isInvalidCategory = invalidCategoryRegex.test(textboxValue);
 
     if (isInvalidCategory) {
-      displayError("A blank category? Not allowed I'm afraid.");
+      displayError("A blank category name? Not allowed I'm afraid.");
 
       return;
     } else {
@@ -340,7 +371,7 @@ function initialiseForm() {
     } else if (mRegex.test(inputValue)) {
       textbox.style.color = "slateblue";
     } else {
-      textbox.style.color = "black";
+      textbox.style.color = "var(--text-color)";
     }
   });
 }
@@ -373,7 +404,7 @@ function selectNav(direction) {
   const navElements = document.querySelectorAll(".nav-element:not(.hidden)");
   const logContainers = document.querySelectorAll(".category-log-container");
   const textbox = document.getElementById("textbox");
-  textbox.style.color = "black";
+  textbox.style.color = "var(--text-color)";
   unselectAllLogs();
 
   if (currentCategory == null) {
@@ -395,7 +426,7 @@ function selectNav(direction) {
   });
 
   if (navElements[currentCategory]) {
-    navElements[currentCategory].style.backgroundColor = "tomato";
+    navElements[currentCategory].style.backgroundColor = "var(--theme-color)";
     navElements[currentCategory].style.color = "white";
 
     navElements[currentCategory].scrollIntoView({
@@ -431,11 +462,16 @@ function selectNav(direction) {
   focusText();
 }
 
+function scrollToTopOfLog() {
+  const logContainer = document.getElementById("log-container");
+  logContainer.scrollTo(0,0);
+}
+
 function selectLog(down) {
   const textbox = document.getElementById("textbox");
 
   let logs = document.querySelectorAll(
-    `.category-log-container:not(.hidden) p`
+    `.category-log-container:not(.hidden) input`
   );
   if (logs.length === 0) {
     return;
@@ -469,12 +505,21 @@ function selectLog(down) {
     return;
   }
 
-  if (currentSelectedLog) currentSelectedLog.classList.remove("selected");
+  if (currentSelectedLog) {
+    currentSelectedLog.removeEventListener("input", editLogHandler);
+    currentSelectedLog.classList.remove("selected");
+    currentSelectedLog.blur();
+  }
   currentSelectedLog = logs[selectedIndex];
   currentSelectedLog.classList.add("selected");
+  currentSelectedLog.addEventListener("input", editLogHandler);
+  currentSelectedLog.focus();
+  setTimeout(() => {
+    currentSelectedLog.selectionStart = currentSelectedLog.selectionEnd = currentSelectedLog.value.length;
+  }, 10);
 
   currentSelectedLog.scrollIntoView({
-    behavior: "smooth",
+    behavior: "instant",
     block: "nearest",
   });
 
@@ -495,7 +540,83 @@ function selectLog(down) {
           rightEdge - scrollableContainer.offsetWidth + buffer;
       }
     }
-  }, 100);
+  }, 20);
+}
+
+function selectBoundingLog(top) {
+  const textbox = document.getElementById("textbox");
+
+  let logs = document.querySelectorAll(
+    `.category-log-container:not(.hidden) input`
+  );
+  if (logs.length === 0) {
+    return;
+  }
+
+  textbox.blur();
+
+  if (currentSelectedLog) {
+    currentSelectedLog.removeEventListener("input", editLogHandler);
+    currentSelectedLog.classList.remove("selected");
+    currentSelectedLog.blur();
+  }
+
+  
+  // Select the last log
+  if (top) {
+    selectedIndex = 0;
+  } else {
+    selectedIndex = logs.length - 1;
+  }
+  currentSelectedLog = logs[selectedIndex];
+  currentSelectedLog.classList.add("selected");
+  currentSelectedLog.addEventListener("input", editLogHandler);
+  currentSelectedLog.focus();
+  setTimeout(() => {
+    currentSelectedLog.selectionStart = currentSelectedLog.selectionEnd = currentSelectedLog.value.length;
+  }, 10);
+
+  currentSelectedLog.scrollIntoView({
+    behavior: "instant",
+    block: "nearest",
+  });
+
+  setTimeout(() => {
+    const scrollableContainer = currentSelectedLog.parentElement;
+    const buffer = 20;
+
+    // Adjust scrolling if necessary
+    if (scrollableContainer.scrollLeft > currentSelectedLog.offsetLeft) {
+      scrollableContainer.scrollLeft = currentSelectedLog.offsetLeft - buffer;
+    } else {
+      const rightEdge = currentSelectedLog.offsetLeft + currentSelectedLog.offsetWidth;
+      const scrollRightEdge = scrollableContainer.scrollLeft + scrollableContainer.offsetWidth;
+
+      if (rightEdge > scrollRightEdge) {
+        scrollableContainer.scrollLeft = rightEdge - scrollableContainer.offsetWidth + buffer;
+      }
+    }
+  }, 20);
+}
+
+function editLogHandler() {
+  const content = this.value;
+  const category = this.getAttribute("data-category");
+  const id = this.getAttribute("data-log-id");
+
+  // Clear the existing timer if it exists
+  if (debounceTimer) clearTimeout(debounceTimer);
+
+  // Set a new timer
+  debounceTimer = setTimeout(() => {
+    editLog(content, category, id);
+  }, 500); // Delay in milliseconds, adjust as needed
+}
+
+function editLog(content, category, id) {
+  let logData = [];
+  logData.push({ content, category, id });
+  window.electronAPI.editLog(logData);
 }
 
 function unselectAllLogs() {
@@ -531,39 +652,95 @@ function deleteLog() {
 }
 
 function markDone() {
-  let selectedLogs = document.querySelectorAll(".log-item.selected");
+  let selectedLog = document.querySelector(".log-item.selected");
   let logData = [];
 
-  selectedLogs.forEach((log) => {
-    let logCategory = log.getAttribute("data-category");
-    let logId = log.getAttribute("data-log-id");
+    let logCategory = selectedLog.getAttribute("data-category");
+    let logId = parseInt(selectedLog.getAttribute("data-log-id"));
     logData.push({ logCategory, logId });
 
-    let logStatus = log.getAttribute("data-log-status");
-    log.setAttribute(
+    let logStatus = selectedLog.getAttribute("data-log-status");
+
+    let doneLogs = Array.from(
+      document.querySelectorAll(
+        `.log-item[data-category="${logCategory}"][data-log-status="done"]`
+      )
+    );
+    let activeLogs = Array.from(
+      document.querySelectorAll(
+        `.log-item[data-category="${logCategory}"][data-log-status="active"]`
+      )
+    );
+
+    if (logStatus === "active") {
+      selectedLog.disabled = true;
+      let isLastActiveLog =
+        logStatus === "active" && selectedLog === activeLogs[activeLogs.length - 1];
+      let firstDoneLog = document.querySelector(
+        `.log-item[data-category="${logCategory}"][data-log-status="done"]`
+      );
+      let firstDoneLogId = firstDoneLog
+        ? parseInt(firstDoneLog.getAttribute("data-log-id"))
+        : Infinity;
+
+      if (!(isLastActiveLog && logId < firstDoneLogId)) {
+        selectLog(true);
+      }
+    }
+
+    if (logStatus === "done") {
+      selectedLog.disabled = false;
+      let isFirstDoneLog = logStatus === "done" && selectedLog === doneLogs[0];
+      let lastActiveLog =
+        activeLogs.length > 0 ? activeLogs[activeLogs.length - 1] : null;
+      let lastActiveLogId = lastActiveLog
+        ? parseInt(lastActiveLog.getAttribute("data-log-id"))
+        : -Infinity;
+
+      if (!(isFirstDoneLog && logId > lastActiveLogId)) {
+        selectLog(false);
+      }
+    }
+
+    selectedLog.setAttribute(
       "data-log-status",
       logStatus === "active" ? "done" : "active"
     );
 
-    let container = log.parentElement;
-    let activeLogs = container.querySelectorAll(
-      '.log-item[data-log-status="active"]'
-    );
-    let lastActiveLog = activeLogs[activeLogs.length - 1];
+    reorderLogsInCategory(logCategory);
 
-    if (lastActiveLog) {
-      let logs = document.querySelectorAll(
-        `.log-item[data-category="${logCategory}"]`
-      );
-      if (selectedIndex + 1 === logs.length) {
-        selectLog(false);
-      } else {
-        selectLog(true);
-        selectedIndex--;
-      }
-      lastActiveLog.after(log);
+  let postActionLog = document.querySelector(".log-item.selected");
+  setTimeout(() => {
+    postActionLog.focus();
+    postActionLog.selectionStart = postActionLog.selectionEnd = postActionLog.value.length;
+  }, 10);
+
+  window.electronAPI.markDone(logData);
+}
+
+function reorderLogsInCategory(category) {
+  let categoryContainer = document.getElementById(`category-logs-${category}`);
+
+  if (!categoryContainer) {
+    console.error("Category container not found for", category);
+    return;
+  }
+
+  let logItems = categoryContainer.querySelectorAll(".log-item");
+  let logsArray = Array.from(logItems);
+
+  logsArray.sort((a, b) => {
+    let statusA = a.getAttribute("data-log-status");
+    let statusB = b.getAttribute("data-log-status");
+    let idA = parseInt(a.getAttribute("data-log-id"));
+    let idB = parseInt(b.getAttribute("data-log-id"));
+
+    if (statusA === statusB) {
+      return idA - idB;
+    } else {
+      return statusA === "active" ? -1 : 1;
     }
   });
 
-  window.electronAPI.markDone(logData);
+  logsArray.forEach((log) => categoryContainer.appendChild(log));
 }

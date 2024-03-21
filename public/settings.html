@@ -1,0 +1,66 @@
+<html>
+    <head>
+        <link rel="stylesheet" href="settings.css">
+    </head>
+    <body>
+        <div id="main">
+            <div id="banner"><p>Settings</p><p id="close-button" onclick="window.electronAPI.closeWindow()">X</p></div>
+            <div id="tip-container">
+                <div id="path-header">
+                    <h2>Your config file is here:</h2>
+                    <button id="open-config">Open Folder</button></div>
+                <div id="config-path" class="databox"></div>
+                <div id="tip">Deleting your config file will cause the app to start fresh on next run, but your logs will still be available at the below path.</div>
+                <div id="path-header">
+                    <h2>Your logs are stored here:</h2>
+                    <button id="open-logs">Open Folder</button></div>
+                <div id="logs-path" class="databox"></div>
+                <div id="tip">Deleting or moving your logs will cause the app to make a new blank set of logs in the same path as defined in the config file above.</div>
+                <h2>Accent color and theme (only applies to editor):</h2>
+                <div id="theme-picker">Theme:
+                    <div id="light" class="palette" style="background-color: #EEE;" onclick="setTheme(this.id)"></div>
+                    <div id="dark" class="palette" style="background-color: #111;" onclick="setTheme(this.id)"></div>
+                </div>
+                <div id="color-picker">
+                    Accent: 
+                    <div id="tomato" class="palette" style="background-color: tomato;" onclick="setColor(this.id)"></div>
+                    <div id="orange" class="palette" style="background-color: orange;" onclick="setColor(this.id)"></div>
+                    <div id="darkgreen" class="palette" style="background-color: darkgreen;" onclick="setColor(this.id)"></div>
+                    <div id="teal" class="palette" style="background-color: teal;" onclick="setColor(this.id)"></div>
+                    <div id="dodgerblue" class="palette" style="background-color: dodgerblue;" onclick="setColor(this.id)"></div>
+                    <div id="lightcoral" class="palette" style="background-color: lightcoral;" onclick="setColor(this.id)"></div>
+                    <div id="blueviolet" class="palette" style="background-color: blueviolet;" onclick="setColor(this.id)"></div>
+                    <div id="black" class="palette" style="background-color: black;" onclick="setColor(this.id)"></div>
+                </div>
+            </div>
+        </div>
+        </div>
+        <script>
+            function enumerateData(configPath, logPath) {
+                function trimFilename(path) {
+                    const lastBackslashIndex = path.lastIndexOf('\\');
+                    if (lastBackslashIndex === -1) return path;
+                    return path.substring(0, lastBackslashIndex);
+                }
+
+                const trimmedConfigPath = trimFilename(configPath);
+                const trimmedLogPath = trimFilename(logPath);
+
+                console.log(trimmedConfigPath, trimmedLogPath);
+                document.getElementById("config-path").textContent = configPath;
+                document.getElementById("logs-path").textContent = logPath;
+
+                document.getElementById("open-config").onclick = () => window.electronAPI.openExplorer(trimmedConfigPath);
+                document.getElementById("open-logs").onclick = () => window.electronAPI.openExplorer(trimmedLogPath);
+            }
+
+            function setColor(colorId) {
+                window.electronAPI.sendColor(colorId);
+            }
+
+            function setTheme(themeId) {
+                window.electronAPI.sendTheme(themeId);
+            }
+        </script>
+    </body>
+</html>

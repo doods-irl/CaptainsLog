@@ -7,45 +7,84 @@ const {
   dialog,
   Menu,
   Tray,
+  shell,
 } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
 let setupWin;
 let tutorialWin;
+let settingsWin;
 let win;
 let miniHeight = 90;
 let bigHeight = 800;
 let configPath;
 let filePath;
 let tray = null;
+let accentColor;
+let themeColor;
+const singleInstanceLock = app.requestSingleInstanceLock();
+const appFolder = path.dirname(process.execPath);
+const exeName = path.resolve(appFolder, '..', `Captain's Log.exe`);
+
+if (!singleInstanceLock) {
+  app.quit();
+}
+
+app.on("second-instance", (event, commandLine, workingDirectory) => {
+  setTimeout(() => {
+    showBigEditor();
+  }, 100);
+});
+
+app.setLoginItemSettings({
+  openAtLogin: true,
+  args: [
+    '--processStart', `"${exeName}"`,
+    '--process-start-args', '"--hidden"'
+  ]
+})
 
 app.on("ready", () => {
-  tray = new Tray(path.join(__dirname, 'favicon.ico'));
+  tray = new Tray(path.join(__dirname, "favicon.ico"));
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Mini Editor',
-      click: () => { showMiniEditor(); }
+      label: "Mini Editor",
+      click: () => {
+        showMiniEditor();
+      },
     },
     {
-      label: 'Big Editor',
-      click: () => { showBigEditor(); }
+      label: "Big Editor",
+      click: () => {
+        showBigEditor();
+      },
     },
     {
-      label: 'Tutorial',
-      click: () => { createTutorialWindow(); }
+      label: "Tutorial",
+      click: () => {
+        createTutorialWindow();
+      },
     },
     {
-      label: 'Close',
-      click: () => { app.quit(); }
-    }
+      label: "Settings",
+      click: () => {
+        createSettingsWindow();
+      },
+    },
+    {
+      label: "Close",
+      click: () => {
+        app.quit();
+      },
+    },
   ]);
 
   tray.setToolTip(`Captain's Log`);
   tray.setContextMenu(contextMenu);
 
-  let setupComplete = checkSetupComplete(); 
+  let setupComplete = checkSetupComplete();
 
   if (setupComplete) {
     createWindow();
@@ -56,6 +95,7 @@ app.on("ready", () => {
 
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+  getAccentColor();
 
   win = new BrowserWindow({
     width: 800,
@@ -77,7 +117,9 @@ function createWindow() {
   checkJSON();
 
   win.on("show", () => {
+    win.webContents.executeJavaScript(`setTheme('${accentColor}', '${themeColor}')`);
     serveLogs();
+    win.webContents.executeJavaScript("selectNav(1)");
   });
 
   win.on("blur", () => {
@@ -89,7 +131,7 @@ function createWindow() {
     win.setResizable(false);
   });
 
-  tray.on('click', () => showBigEditor());
+  tray.on("click", () => showBigEditor());
 }
 
 function createSetupWindow() {
@@ -98,6 +140,7 @@ function createSetupWindow() {
     height: 197,
     frame: false,
     resizable: false,
+    icon: "favicon.ico",
     webPreferences: {
       preload: path.join(__dirname, "setupPreload.js"),
       contextIsolation: true,
@@ -113,18 +156,55 @@ function createTutorialWindow() {
     height: 800,
     frame: false,
     resizable: false,
+    icon: "favicon.ico",
     webPreferences: {
+      preload: path.join(__dirname, "tutorialPreload.js"),
       contextIsolation: true,
       devTools: false,
     },
   });
   tutorialWin.loadFile("public/tutorial.html");
   tutorialWin.show();
-
-  tutorialWin.on("blur", () => {
-    win.hide();
-  });
 }
+
+ipcMain.on("close-tutorial-window", (event) => {
+  tutorialWin.close();
+});
+
+function createSettingsWindow() {
+  const escapedConfigPath = configPath.replace(/\\/g, "\\\\");
+  const escapedFilePath = filePath.replace(/\\/g, "\\\\");
+
+  settingsWin = new BrowserWindow({
+    width: 800,
+    height: 456,
+    frame: false,
+    resizable: false,
+    icon: "favicon.ico",
+    webPreferences: {
+      preload: path.join(__dirname, "settingsPreload.js"),
+      contextIsolation: true,
+      devTools: false,
+    },
+  });
+  settingsWin.loadFile("public/settings.html");
+  settingsWin.show();
+  settingsWin.webContents.executeJavaScript(
+    `enumerateData("${escapedConfigPath}", "${escapedFilePath}")`
+  );
+}
+
+ipcMain.on("open-explorer", (event, path) => {
+  shell.openPath(path).then((err) => {
+    if (err) {
+      console.error("Error opening path:", err);
+    }
+  });
+});
+
+ipcMain.on("close-settings-window", (event) => {
+  settingsWin.close();
+});
 
 function checkSetupComplete() {
   const userDataPath = app.getPath("userData");
@@ -143,18 +223,52 @@ function checkSetupComplete() {
   return false;
 }
 
+function getAccentColor() {
+  fs.readFile(configPath, "utf8", (err, data) => {
+    if (err) {
+      console.error("Error reading the file:", err);
+      return;
+    }
+
+    try {
+      const config = JSON.parse(data);
+      accentColor = config.color;
+      themeColor = config.theme;
+    } catch (parseErr) {
+      accentColor = "tomato";
+      themeColor = "light";
+      console.error("Error parsing JSON:", parseErr);
+    }
+  });
+}
+
+ipcMain.on("commit-color-to-config", (event, colorId) => {
+  console.log(colorId);
+  const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  config.color = colorId;
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  accentColor = colorId;
+});
+
+ipcMain.on("commit-theme-to-config", (event, themeId) => {
+  const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  config.theme = themeId;
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  themeColor = themeId;
+});
+
 ipcMain.on("open-file-dialog", async (event) => {
   const { filePaths } = await dialog.showOpenDialog({
     properties: ["openDirectory"],
   });
   if (filePaths && filePaths.length > 0) {
-    event.sender.send("selected-directory", filePaths[0]); 
+    event.sender.send("selected-directory", filePaths[0]);
   }
 });
 
 ipcMain.on("receive-setup-path", (event, receivedPath) => {
   filePath = path.join(receivedPath, "captainsLogs.json");
-  const configData = { filePath: filePath };
+  const configData = { filePath: filePath, color: "tomato", theme: "light" };
   fs.writeFile(configPath, JSON.stringify(configData), (err) => {
     if (err) {
       console.error("Error writing config file:", err);
@@ -196,7 +310,10 @@ function registerShortcuts() {
 }
 
 function showMiniEditor() {
+  win.webContents.executeJavaScript(`setTheme('${accentColor}', '${themeColor}')`);
   serveLogs();
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+  win.setPosition(width - 820, 20);
   win.webContents.executeJavaScript("clearText()");
   win.show();
   win.setSize(800, miniHeight);
@@ -204,6 +321,9 @@ function showMiniEditor() {
 }
 
 function showBigEditor() {
+  win.webContents.executeJavaScript(`setTheme('${accentColor}', '${themeColor}')`);
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+  win.setPosition(width - 820, 20);
   win.webContents.executeJavaScript("clearText()");
   win.show();
   win.setSize(800, bigHeight);
@@ -232,13 +352,11 @@ ipcMain.on("refresh-logs", (event) => {
 });
 
 ipcMain.on("text-submitted", (event, formData) => {
-  
   let size = win.getSize();
   if (size[0] === 800 && size[1] === 90) {
-    win.blur(); 
+    win.blur();
   }
 
-  
   fs.readFile(filePath, (err, data) => {
     if (err && err.code === "ENOENT") {
       var json = { categories: [] };
@@ -248,21 +366,18 @@ ipcMain.on("text-submitted", (event, formData) => {
       var json = JSON.parse(data);
     }
 
-    
     if (!json.categories) {
       json.categories = [];
     }
 
-    
     let category = "notes";
     let content = formData;
     if (formData.startsWith("/")) {
       const splitData = formData.split(" ");
-      category = splitData[0].substring(1); 
+      category = splitData[0].substring(1);
       content = splitData.slice(1).join(" ");
     }
 
-    
     let categoryObj = json.categories.find(
       (cat) => cat.name === category.toLowerCase()
     );
@@ -276,7 +391,7 @@ ipcMain.on("text-submitted", (event, formData) => {
 
     if (content != "") {
       const newLog = {
-        id: categoryObj.logs.length + 1, 
+        id: categoryObj.logs.length + 1,
         content: content,
         status: "active",
       };
@@ -293,9 +408,34 @@ ipcMain.on("text-submitted", (event, formData) => {
   }, 10);
 });
 
-ipcMain.on("modify-log-delete", (event, logDataArray) => {
-  
+ipcMain.on("modify-log-edit", (event, logDataArray) => {
+  fs.readFile(filePath, (err, data) => {
+    if (err) throw err;
 
+    let json = JSON.parse(data);
+
+    logDataArray.forEach((logData) => {
+      let categoryObj = json.categories.find(
+        (cat) => cat.name === logData.category  // Changed from logData.logCategory
+      );
+      if (categoryObj) {
+        let logObj = categoryObj.logs.find(
+          (log) => log.id.toString() === logData.id  // Changed from logData.logId
+        );
+        if (logObj) {
+          logObj.content = logData.content;  // Update the content instead of setting status to 'deleted'
+          // You can add more fields to update here if necessary
+        }
+      }
+    });
+
+    fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
+      if (err) throw err;
+    });
+  });
+});
+
+ipcMain.on("modify-log-delete", (event, logDataArray) => {
   fs.readFile(filePath, (err, data) => {
     if (err) throw err;
 
@@ -322,8 +462,6 @@ ipcMain.on("modify-log-delete", (event, logDataArray) => {
 });
 
 ipcMain.on("modify-log-done", (event, logDataArray) => {
-  
-
   fs.readFile(filePath, (err, data) => {
     if (err) throw err;
 
@@ -334,17 +472,15 @@ ipcMain.on("modify-log-done", (event, logDataArray) => {
         (cat) => cat.name === logData.logCategory
       );
       if (categoryObj) {
-        let logObj = categoryObj.logs.find(
-          (log) => log.id.toString() === logData.logId
-        );
+        let logIdInt = parseInt(logData.logId);
+
+        let logObj = categoryObj.logs.find((log) => log.id === logIdInt);
         if (logObj) {
-          
           logObj.status = logObj.status === "active" ? "done" : "active";
         }
       }
     });
 
-    
     fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
       if (err) throw err;
     });
@@ -357,12 +493,10 @@ ipcMain.on("modify-category-delete", (event, categoryName) => {
 
     let json = JSON.parse(data);
 
-    
     json.categories = json.categories.filter(
       (cat) => cat.name !== categoryName
     );
 
-    
     fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
       if (err) throw err;
     });
@@ -379,17 +513,14 @@ ipcMain.on("modify-category-empty", (event, categoryName) => {
 
     let json = JSON.parse(data);
 
-    
     let categoryObj = json.categories.find((cat) => cat.name === categoryName);
 
     if (categoryObj) {
-      
       categoryObj.logs.forEach((log) => {
         log.status = "deleted";
       });
     }
 
-    
     fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
       if (err) throw err;
     });
@@ -406,22 +537,15 @@ ipcMain.on("modify-category-move", (event, categoryName, position) => {
 
     let json = JSON.parse(data);
 
-    
     const categoryIndex = json.categories.findIndex(
       (cat) => cat.name === categoryName
     );
 
     if (categoryIndex !== -1) {
-      
       const [categoryObj] = json.categories.splice(categoryIndex, 1);
-
-      
       position = Math.max(0, Math.min(position, json.categories.length));
-
-      
       json.categories.splice(position, 0, categoryObj);
 
-      
       fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
         if (err) throw err;
       });

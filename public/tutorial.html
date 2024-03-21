@@ -1,32 +1,43 @@
 <html>
     <head>
-        <link rel="stylesheet" href="setup.css">
+        <link rel="stylesheet" href="tutorial.css">
     </head>
     <body>
         <div id="main">
-            <div id="banner"><p>A quick tutorial...</p></div>
-            <form id="text-form">
+            <div id="banner"><p>A quick tutorial...</p><p id="close-button" onclick="window.electronAPI.closeWindow()">X</p></div>
+            <div id="tip-container">
+                <div id="tip">Right click on the Captain's Log icon in the notification tray and select <strong>Tutorial</strong> to find this page again.</div>
                 <h2>Access the app</h2>
                 <div id="tip">Press <strong>CTRL + ALT + L</strong> to bring up the mini editor.</div>
                 <div id="tip">Press <strong>CTRL + ALT + L</strong> again to make it big.</div>
                 <div id="tip">Press <strong>CTRL + ALT + K</strong> to bring up the big editor right away.</div>
+                <div id="tip">Press <strong>Escape</strong> to hide the editor.</div>
                 <h2>Create Logs and Categories</h2>
                 <div id="tip">Type a note and press <strong>Enter</strong> to create a log in the default Notes section.</div>
-                <div id="tip">Type a / followed by a word to create a category e.g. <strong>/pickles</strong> to create a category for notes about pickles.</div>
-                <div id="tip">Optionally, type a note after a new category name to create a log in that category at the point of creation.</div>
+                <div id="tip">Type a <strong>/</strong> followed by a word to create a category e.g. <strong>/pickles</strong> to create a category for logs about pickles.</div>
+                <div id="tip">Optionally, type a note after a new category name to create a log in that category as it's created. e.g. <strong>/pickles Taste just okay...</strong></div>
                 <h2>Navigate Categories and Logs</h2>
+                <div id="tip"><strong>With the log entry box focussed:</strong></div>
                 <div id="tip">Press <strong>Tab / Shift + Tab</strong> or <strong>Right Arrow / Left Arrow</strong> to move between categories.</div>
-                <div id="tip">When a Category is selected press <strong>Up Arrow / Down Arrow</strong> to select a log.</div>
+                <div id="tip">Type a <strong>/</strong> followed by a category name to filter categories, then press <strong>Tab</strong> until you've selected the one you're after.</div>
+                <div id="tip">Press <strong>Up Arrow / Down Arrow</strong> to select a log.</div>
+                <div id="tip">Press <strong>Shift + Up Arrow / Shift + Down Arrow</strong> to jump back to the log entry box or select the last log in the category.</div>
                 <h2>Manage Logs</h2>
-                <div id="tip">When a log is selected press <strong>Enter</strong> to mark it as done.</div>
-                <div id="tip">Alternatively press <strong>Delete</strong> to delete a selected log.</div>
-                <h2>Category bonus features</h2>
-                <div id="tip">With a category selected type in a colon to make a sub category e.g. <strong></strong>/pickles:recipe</div>
-                <div id="tip">With a category selected type in <strong>/e</strong> and press <strong>Enter</strong> to delete all notes in a category e.g. <strong>/pickles /e</strong></div>
-                <div id="tip">With a category selected type in <strong>/d</strong> and press <strong>Enter</strong> to delete the category e.g. <strong>/pickles /d</strong></div>
-                <div id="tip">With a category selected type in <strong>/m#</strong> to move the position of the category relative to notes e.g. <strong>/pickles /m1</strong> will move a category one to the right of Notes.</div>
-            </form>
+                <div id="tip"><strong>When a log is selected:</strong></div>
+                <div id="tip">Start typing to edit its contents.</div>
+                <div id="tip">Press <strong>Shift + Enter</strong> to mark it as done.</div>
+                <div id="tip">Press <strong>Shift + Delete</strong> to delete the log.</div>
+                <h2>Category advanced features</h2>
+                <div id="tip"><strong>With a category selected:</strong></div>
+                <div id="tip">Type a colon to make a sub-category e.g. <strong>/pickles:recipe</strong></div>
+                <div id="tip">Type <strong>/e</strong> and press <strong>Enter</strong> to delete all logs in a category e.g. <strong>/pickles /e</strong></div>
+                <div id="tip">Type <strong>/d</strong> and press <strong>Enter</strong> to delete the category e.g. <strong>/pickles /d</strong></div>
+                <div id="tip">Alternatively, <strong>empty:</strong> or <strong>delete:</strong> followed by a category name will do the same thing e.g. <strong>empty:pickles</strong> or <strong>delete:pickles</strong></div>
+                <div id="tip">Type <strong>/m#</strong> to move the position of the category relative to the Notes category e.g. <strong>/pickles /m1</strong> will move a category one to the right of Notes.</div>
+                <h2>Settings</h2>
+                <div id="tip">Right click on the Captain's Log icon in the notification tray and select <strong>Settings</strong></div>
+                <div id="tip">From here you can quickly access your config, log files, and set the color theme of the editor.</div>
+            </div>
         </div>
-        <script src="setup.js"></script>
     </body>
 </html>
