@@ -12,7 +12,6 @@
   "author": "Max Vinten",
   "license": "ISC",
   "devDependencies": {
-    "cross-env": "^7.0.3",
     "electron": "^29.1.2",
     "electron-builder": "^24.13.3"
   },

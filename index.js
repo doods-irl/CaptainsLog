@@ -103,11 +103,11 @@ function createWindow() {
     x: width - 820,
     y: 20,
     frame: false,
-    resizable: false,
+    resizable: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      devTools: false,
+      devTools: true,
     },
     skipTaskbar: true,
   });
@@ -117,9 +117,7 @@ function createWindow() {
   checkJSON();
 
   win.on("show", () => {
-    win.webContents.executeJavaScript(`setTheme('${accentColor}', '${themeColor}')`);
     serveLogs();
-    win.webContents.executeJavaScript("selectNav(1)");
   });
 
   win.on("blur", () => {
@@ -243,11 +241,11 @@ function getAccentColor() {
 }
 
 ipcMain.on("commit-color-to-config", (event, colorId) => {
-  console.log(colorId);
   const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
   config.color = colorId;
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
   accentColor = colorId;
+  win.webContents.executeJavaScript(`setTheme('${accentColor}', '${themeColor}')`);
 });
 
 ipcMain.on("commit-theme-to-config", (event, themeId) => {
@@ -255,6 +253,7 @@ ipcMain.on("commit-theme-to-config", (event, themeId) => {
   config.theme = themeId;
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
   themeColor = themeId;
+  win.webContents.executeJavaScript(`setTheme('${accentColor}', '${themeColor}')`);
 });
 
 ipcMain.on("open-file-dialog", async (event) => {
@@ -310,7 +309,6 @@ function registerShortcuts() {
 }
 
 function showMiniEditor() {
-  win.webContents.executeJavaScript(`setTheme('${accentColor}', '${themeColor}')`);
   serveLogs();
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   win.setPosition(width - 820, 20);
@@ -321,7 +319,7 @@ function showMiniEditor() {
 }
 
 function showBigEditor() {
-  win.webContents.executeJavaScript(`setTheme('${accentColor}', '${themeColor}')`);
+  serveLogs();
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   win.setPosition(width - 820, 20);
   win.webContents.executeJavaScript("clearText()");
@@ -342,7 +340,7 @@ function serveLogs() {
       console.error("Error reading the file:", err);
       return;
     }
-
+    win.webContents.executeJavaScript(`setTheme('${accentColor}', '${themeColor}')`);
     win.webContents.executeJavaScript(`renderLogs(${data})`);
   });
 }
@@ -371,24 +369,64 @@ ipcMain.on("text-submitted", (event, formData) => {
     }
 
     let category = "notes";
+    let subCategory = null;
     let content = formData;
     if (formData.startsWith("/")) {
       const splitData = formData.split(" ");
-      category = splitData[0].substring(1);
+      const fullPath = splitData[0].substring(1);
+      const pathParts = fullPath.split(':');
+
+      category = pathParts[0].toLowerCase();
+      if (pathParts.length > 1) {
+        subCategory = `${category}:${pathParts[1].toLowerCase()}`;
+      }
+
       content = splitData.slice(1).join(" ");
     }
 
-    let categoryObj = json.categories.find(
-      (cat) => cat.name === category.toLowerCase()
-    );
+    // Create or update main category
+    let categoryObj = json.categories.find(cat => cat.name === category);
     if (!categoryObj) {
       categoryObj = {
-        name: category.toLowerCase(),
+        name: category,
+        status: "active",
         logs: [],
       };
       json.categories.push(categoryObj);
+    } else {
+      // Reactivate the category if it was deleted
+      if (categoryObj.status === "deleted") {
+        categoryObj.status = "active";
+        // Also reactivate all its subcategories
+        json.categories.forEach(cat => {
+          if (cat.name.startsWith(category + ':') && cat.status === "deleted") {
+            cat.status = "active";
+          }
+        });
+      }
     }
 
+    // Handle subcategory
+    if (subCategory) {
+      let subCategoryObj = json.categories.find(cat => cat.name === subCategory);
+      if (!subCategoryObj) {
+        subCategoryObj = {
+          name: subCategory,
+          status: "active",
+          logs: [],
+        };
+        json.categories.push(subCategoryObj);
+      } else {
+        // Reactivate the subcategory if it was deleted
+        if (subCategoryObj.status === "deleted") {
+          subCategoryObj.status = "active";
+        }
+      }
+      // Point to the subcategory object
+      categoryObj = subCategoryObj;
+    }
+
+    // Create log if content is not empty
     if (content != "") {
       const newLog = {
         id: categoryObj.logs.length + 1,
@@ -493,9 +531,12 @@ ipcMain.on("modify-category-delete", (event, categoryName) => {
 
     let json = JSON.parse(data);
 
-    json.categories = json.categories.filter(
-      (cat) => cat.name !== categoryName
-    );
+    // Mark the specified category and its subcategories as deleted
+    json.categories.forEach(cat => {
+      if (cat.name === categoryName || cat.name.startsWith(categoryName + ':')) {
+        cat.status = "deleted";
+      }
+    });
 
     fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
       if (err) throw err;

@@ -1,12 +1,20 @@
+let textbox;
 let categories;
+let mainCategories = {};
 let currentCategory;
 let currentSelectedLog = null;
 let keysPressed = {};
 let selectedIndex;
 let debounceTimer;
 
+document.addEventListener("DOMContentLoaded", () => {
+  textbox = document.getElementById("textbox");
+  window.electronAPI.refreshLogs();
+  initialiseForm();
+  hideSubcategories();
+});
+
 function focusText() {
-  const textbox = document.getElementById("textbox");
   unselectAllLogs();
   scrollToTopOfLog();
   if (textbox) {
@@ -15,10 +23,12 @@ function focusText() {
 }
 
 function clearText() {
-  const textbox = document.getElementById("textbox");
   if (textbox) {
     textbox.value = "";
   }
+  filterCategories("");
+  showAllCategories();
+  hideSubcategories();
 }
 
 function setTheme(accentColor, themeColor) {
@@ -26,124 +36,92 @@ function setTheme(accentColor, themeColor) {
   document.documentElement.setAttribute("data-theme", themeColor);
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  window.electronAPI.refreshLogs();
-  initialiseForm();
-});
-
 window.addEventListener("keydown", function (event) {
   keysPressed[event.key] = true;
 
-  if (!keysPressed["Shift"] && !currentSelectedLog && event.key === "ArrowRight") {
-    selectNav(1);
-  } else if (!keysPressed["Shift"] && !currentSelectedLog && event.key === "ArrowLeft") {
-    selectNav(-1);
+  function resetNavigationAndTextbox() {
+    clearText();
+    setTimeout(() => {
+      selectNav(0);
+    }, 20);
+  }
+
+  function handleTabNavigation() {
+    event.preventDefault();
+    focusText();
+    selectNav(keysPressed["Shift"] ? -1 : 1);
+  }
+
+  if (!currentSelectedLog) {
+    if (event.key === "ArrowRight" && !keysPressed["Shift"]) {
+      selectNav(1);
+    } else if (event.key === "ArrowLeft" && !keysPressed["Shift"]) {
+      selectNav(-1);
+    } else if (event.key === "Enter" && textbox.value.match(/^\/\w+ $/)) {
+      resetNavigationAndTextbox();
+    }
   }
 
   if (event.key === "Backspace") {
-    const textbox = document.getElementById("textbox");
-
-    const categoryWithSubcategoryRegex = /^\/\w+:([^ ]+)?$/;
-
-    const categoryWithOneWordRegex = /^\/\w+:[^ ]+ $/;
-    const categoryRegex = /^\/\w+ $/;
-
     if (textbox.value === "delete:" || textbox.value === "empty:") {
-      textbox.value = "";
-      showAllCategories();
-    }
-
-    if (categoryWithOneWordRegex.test(textbox.value)) {
-      textbox.value = textbox.value.substring(
-        0,
-        textbox.value.lastIndexOf(":") + 1
-      );
+      resetNavigationAndTextbox();
+    } else if (textbox.value.match(/^\/\w+:[^ ]+ $/)) {
+      textbox.value =
+        textbox.value.substring(0, textbox.value.lastIndexOf(":")) + " ";
       setTimeout(() => {
         selectNav(0);
       }, 20);
-      Array.from(document.getElementsByClassName("nav-element")).forEach(
-        (nav) => {
-          nav.style.backgroundColor = "";
-          nav.style.color = "";
-        }
-      );
     } else if (
-      categoryWithSubcategoryRegex.test(textbox.value) ||
-      categoryRegex.test(textbox.value)
+      textbox.value.match(/^\/\w+:([^ ]+)? $/) ||
+      textbox.value.match(/^\/\w+ $/)
     ) {
-      textbox.value = textbox.value.replace(/ [^ ]+$/, "");
-      showAllCategories();
-      setTimeout(() => {
-        selectNav(0);
-      }, 20);
+      resetNavigationAndTextbox();
     }
   }
 
-  if (event.key === "Enter" && !currentSelectedLog) {
-    const textbox = document.getElementById("textbox");
-    const categoryRegex = /^\/\w+ $/;
-    if (categoryRegex.test(textbox.value)) {
-      textbox.value = "";
-      showAllCategories();
-      selectNav(1);
-    }
+  if (event.key === "Tab") {
+    handleTabNavigation();
   }
 
-  if (keysPressed["Shift"] && event.key == "Tab") {
-    event.preventDefault();
-    focusText();
-    selectNav(-1);
-  } else if (event.key === "Tab") {
-    event.preventDefault();
-    focusText();
-    selectNav(1);
-  }
-
-  if (event.key === ":") {
-    const categoryRegex = /^\/\w+ $/;
-    if (categoryRegex.test(textbox.value)) {
-      subcatValue = textbox.value.replace(" ", "");
-      textbox.value = subcatValue;
-    }
+  if (event.key === ":" && textbox.value.match(/^\/\w+ $/)) {
+    textbox.value = textbox.value.replace(" ", "");
   }
 
   if (window.innerHeight > 200) {
-    if (!keysPressed["Shift"] && event.key === "ArrowDown" || !keysPressed["Shift"] && event.key === "ArrowUp") {
-      selectLog(event.key === "ArrowDown");
+    if (event.key === "ArrowDown" && !keysPressed["Shift"]) {
+      selectLog(true);
+    } else if (event.key === "ArrowUp" && !keysPressed["Shift"]) {
+      selectLog(false);
     } else if (keysPressed["Shift"] && event.key === "ArrowUp") {
       focusText();
     } else if (keysPressed["Shift"] && event.key === "ArrowDown") {
       selectBoundingLog(false);
-    }else if (keysPressed["Shift"] && event.key === "Enter" && currentSelectedLog) {
+    } else if (
+      keysPressed["Shift"] &&
+      event.key === "Enter" &&
+      currentSelectedLog
+    ) {
       markDone();
-    } else if (keysPressed["Shift"] && event.key === "Delete" && currentSelectedLog) {
+    } else if (
+      keysPressed["Shift"] &&
+      event.key === "Delete" &&
+      currentSelectedLog
+    ) {
       deleteLog();
     }
   }
 
   if (event.key === " ") {
-    const textbox = document.getElementById("textbox");
     const categoryRegex = /^\/(\w+)(?::(\w+))?$/;
     const match = categoryRegex.exec(textbox.value);
-
+  
     if (match) {
-      let potentialCategory = match[1];
-
-      if (match[2]) {
-        potentialCategory += ":" + match[2];
-      }
-
-      const isCategory = categories.some(
-        (category) => category.name === potentialCategory
-      );
-
-      textbox.value = textbox.value.toLowerCase().replace(" ", "");
-
-      if (isCategory) {
-        currentCategory = null;
-        setTimeout(() => {
-          selectNav(0);
-        }, 20);
+      let potentialCategory = match[1] + (match[2] ? ":" + match[2] : "");
+      
+      // Check for an exact match in the categories array
+      if (Array.isArray(categories) && categories.some(category => category === potentialCategory)) {
+        event.preventDefault();
+        selectNav(0); // Call selectNav only if there's a direct match
       }
     }
   }
@@ -156,94 +134,173 @@ window.addEventListener("keyup", (event) => {
 function renderLogs(logs) {
   const categoryContainer = document.getElementById("category-container");
   const logContainer = document.getElementById("log-container");
-  categories = [];
+  categories = []; // Reset categories array
 
-  let categoryNavNotes = document.getElementById(`category-nav-notes`);
-  if (!categoryNavNotes) {
-    categoryNavNotes = document.createElement("div");
-    categoryNavNotes.id = `category-nav-notes`;
-    categoryNavNotes.classList.add("nav-element");
-    categoryNavNotes.setAttribute("data-category-nav", "notes");
-    categoryNavNotes.innerHTML = "notes";
-    categoryContainer.appendChild(categoryNavNotes);
-  }
-
-  let categoryNotesContainer = document.getElementById(`category-logs-notes`);
-  if (!categoryNotesContainer) {
-    categoryNotesContainer = document.createElement("div");
-    categoryNotesContainer.id = `category-logs-notes`;
-    categoryNotesContainer.classList.add("category-log-container");
-    logContainer.appendChild(categoryNotesContainer);
-  }
+  // Preparing containers for 'notes'
+  prepareCategoryContainer("notes", categoryContainer, logContainer);
 
   if (!logs.categories || logs.categories.length === 0) {
     return;
   }
 
-  logs.categories.forEach((category) => {
-    if (!categories.includes(category)) {
-      categories.push(category);
-    }
+  // Group categories and sort subcategories
+  const categoryGroups = groupAndSortCategories(logs.categories);
+
+  categoryGroups.forEach(group => {
+    group.forEach(category => {
+      if (category.status === "deleted") {
+        return;
+      }
+
+    // Add category to the categories array
+    categories.push(category.name.toLowerCase());
 
     let lcCategory = category.name.toLowerCase();
-    let categoryNav = document.getElementById(`category-nav-${lcCategory}`);
-    if (!categoryNav) {
-      categoryNav = document.createElement("div");
-      categoryNav.id = `category-nav-${lcCategory}`;
-      categoryNav.classList.add("nav-element");
-      categoryNav.setAttribute("data-category-nav", lcCategory);
-      categoryNav.innerHTML = `${category.name}`;
-      categoryContainer.appendChild(categoryNav);
+    let match = /^(?:\w+):(\w+)$/.exec(lcCategory);
+
+    let [mainCategory, subCategory] = category.name.toLowerCase().split(':');
+    if (subCategory) {
+      mainCategories[mainCategory] = true; // Mark that this main category has subcategories
     }
 
-    let categoryLogsContainer = document.getElementById(
-      `category-logs-${lcCategory}`
-    );
-    if (!categoryLogsContainer) {
-      categoryLogsContainer = document.createElement("div");
-      categoryLogsContainer.id = `category-logs-${lcCategory}`;
-      categoryLogsContainer.classList.add("category-log-container");
-      logContainer.appendChild(categoryLogsContainer);
+    prepareCategoryNav(lcCategory, category, categoryContainer, mainCategories);
+    prepareCategoryLogContainer(lcCategory, category, logContainer);
+    });
+  });
+  markMainCategoriesWithSubcategories();
+  selectNav(0);
+}
+
+function prepareCategoryContainer(categoryName, categoryContainer, logContainer) {
+  // Handle the special case for 'notes' or any other similar cases
+  let categoryNav = document.getElementById(`category-nav-${categoryName}`);
+  if (!categoryNav) {
+    categoryNav = document.createElement("div");
+    categoryNav.id = `category-nav-${categoryName}`;
+    categoryNav.classList.add("nav-element");
+    categoryNav.setAttribute("data-category-nav", categoryName);
+    categoryNav.innerHTML = categoryName;
+    categoryContainer.appendChild(categoryNav);
+  }
+
+  let categoryLogsContainer = document.getElementById(`category-logs-${categoryName}`);
+  if (!categoryLogsContainer) {
+    categoryLogsContainer = document.createElement("div");
+    categoryLogsContainer.id = `category-logs-${categoryName}`;
+    categoryLogsContainer.classList.add("category-log-container");
+    logContainer.appendChild(categoryLogsContainer);
+  }
+}
+
+function prepareCategoryNav(lcCategory, category, categoryContainer, mainCategories) {
+  let categoryNav = document.getElementById(`category-nav-${lcCategory}`);
+  if (!categoryNav) {
+    categoryNav = document.createElement("div");
+    categoryNav.id = `category-nav-${lcCategory}`;
+    categoryNav.classList.add("nav-element");
+    categoryNav.setAttribute("data-category-nav", lcCategory);
+
+    let isSubcategory = lcCategory.includes(':');
+    let [mainCategory, subCategory] = lcCategory.split(':');
+    let categoryName = category.name;
+
+    // Append bullet if this main category has subcategories
+    if (!isSubcategory && mainCategories[mainCategory]) {
+      categoryName += " &bull;";
     }
 
-    if (category.logs.length === 0) {
+    categoryNav.innerHTML = categoryName;
+
+    if (isSubcategory) {
+      categoryNav.classList.add("hidden", "subcategory");
+    }
+
+    categoryContainer.appendChild(categoryNav);
+  }
+}
+
+function prepareCategoryLogContainer(lcCategory, category, logContainer) {
+  let categoryLogsContainer = document.getElementById(`category-logs-${lcCategory}`);
+  if (!categoryLogsContainer) {
+    categoryLogsContainer = document.createElement("div");
+    categoryLogsContainer.id = `category-logs-${lcCategory}`;
+    categoryLogsContainer.classList.add("category-log-container");
+    logContainer.appendChild(categoryLogsContainer);
+  }
+
+  if (category.logs.length > 0) {
+    renderCategoryLogs(lcCategory, categoryLogsContainer, category.logs);
+  }
+}
+
+function renderCategoryLogs(lcCategory, container, logs) {
+  const sortedLogs = logs.slice().sort((a, b) => {
+    return (a.status === "active" ? -1 : 1) - (b.status === "active" ? -1 : 1);
+  });
+
+  sortedLogs.forEach((log) => {
+    if (log.status === "deleted") {
       return;
-    } else {
-      const sortedLogs = category.logs.slice().sort((a, b) => {
-        if (a.status === "active" && b.status !== "active") {
-          return -1;
-        } else if (a.status !== "active" && b.status === "active") {
-          return 1;
-        }
-        return 0;
-      });
+    }
 
-      sortedLogs.forEach((log) => {
-        if (log.status === "deleted") {
-          return;
-        }
+    let logItem = document.getElementById(`${lcCategory}-log-${log.id}`);
+    if (logItem) {
+      logItem.remove();
+    }
 
-        let logItem = document.getElementById(`${lcCategory}-log-${log.id}`);
-        if (logItem) {
-          logItem.remove();
-        }
+    logItem = document.createElement("input");
+    logItem.type = "text";
+    logItem.value = log.content;
+    logItem.id = `${lcCategory}-log-${log.id}`;
+    logItem.classList.add("log-item");
+    logItem.setAttribute("data-category", lcCategory);
+    logItem.setAttribute("data-log-id", log.id);
+    logItem.setAttribute("data-log-status", log.status);
+    if (log.status == "done") {
+      logItem.disabled = true;
+    }
+    container.appendChild(logItem);
+  });
+}
 
-        logItem = document.createElement("input");
-        logItem.type = 'text';
-        logItem.value = log.content;
-        logItem.id = `${lcCategory}-log-${log.id}`;
-        logItem.classList.add("log-item");
-        logItem.setAttribute("data-category", lcCategory);
-        logItem.setAttribute("data-log-id", log.id);
-        logItem.setAttribute("data-log-status", log.status);
-        if(log.status == 'done') {
-          logItem.disabled = true;
-        }
-        categoryLogsContainer.appendChild(logItem);
-      });
+function markMainCategoriesWithSubcategories() {
+  let mainCategoriesWithSub = {};
+
+  categories.forEach(category => {
+    const [main, sub] = category.split(':');
+    if (sub) {
+      mainCategoriesWithSub[main] = true;
     }
   });
-  selectNav(-1);
+
+  for (let mainCategory in mainCategoriesWithSub) {
+    const mainCategoryNav = document.getElementById(`category-nav-${mainCategory}`);
+    if (mainCategoryNav && !mainCategoryNav.classList.contains("has-subcategory")) {
+      mainCategoryNav.innerHTML += " &bull;";
+      mainCategoryNav.classList.add("has-subcategory"); // Add marker class
+    }
+  }
+}
+
+function groupAndSortCategories(categories) {
+  let categoryGroups = {};
+  categories.forEach(category => {
+    let mainCategory = category.name.split(':')[0];
+    if (!categoryGroups[mainCategory]) {
+      categoryGroups[mainCategory] = [];
+    }
+    categoryGroups[mainCategory].push(category);
+  });
+
+  // Sort subcategories within each main category group
+  Object.values(categoryGroups).forEach(group => {
+    group.sort((a, b) => {
+      return a.name.localeCompare(b.name);
+    });
+  });
+
+  // Flatten the grouped categories into an array of arrays (each group as an array)
+  return Object.values(categoryGroups);
 }
 
 function displayError(err) {
@@ -259,14 +316,12 @@ function displayError(err) {
 
 function initialiseForm() {
   const textForm = document.getElementById("text-form");
-  const textbox = document.getElementById("textbox");
   const errorMessage = document.getElementById("error-message");
   let category;
 
   textForm.addEventListener("submit", (event) => {
     event.preventDefault();
 
-    const textbox = document.getElementById("textbox");
     const textboxValue = textbox.value.trim();
 
     const invalidCategoryRegex = /^\/\s/;
@@ -291,8 +346,7 @@ function initialiseForm() {
       );
       if (categoryExists) {
         window.electronAPI.deleteCategory(categoryToDelete);
-        document.getElementById(`category-nav-${categoryToDelete}`).remove();
-        document.getElementById(`category-logs-${categoryToDelete}`).remove();
+        removeCategoryElements(categoryToDelete);
         textbox.value = "delete:";
       } else {
         displayError(`Category '${categoryToDelete}' not found.`);
@@ -315,10 +369,8 @@ function initialiseForm() {
       content = splitData.slice(1).join(" ");
       if (content == "/d") {
         window.electronAPI.deleteCategory(category);
-        document.getElementById(`category-nav-${category}`).remove();
-        document.getElementById(`category-logs-${category}`).remove();
-        textbox.value = "";
-        filterCategories("");
+        removeCategoryElements(category);
+        clearText();
       } else if (content == "/e") {
         window.electronAPI.emptyCategory(category);
         document
@@ -339,7 +391,11 @@ function initialiseForm() {
         }
       } else {
         window.electronAPI.sendText(textboxValue);
-        textbox.value = `/${category} `;
+        setTimeout(() => {
+          textbox.value = `/${category} `;
+          filterCategories(category);
+          selectNav(1);
+        }, 50);
       }
     } else {
       window.electronAPI.sendText(textboxValue);
@@ -349,6 +405,17 @@ function initialiseForm() {
       selectNav(0);
     }, 5);
   });
+
+  function removeCategoryElements(categoryName) {
+    const categoryPattern = new RegExp(
+      `^category-(nav|logs)-${categoryName}(:|$)`
+    );
+    document.querySelectorAll("[id]").forEach((element) => {
+      if (categoryPattern.test(element.id)) {
+        element.remove();
+      }
+    });
+  }
 
   textbox.addEventListener("input", function () {
     const inputValue = this.value.trim();
@@ -373,6 +440,10 @@ function initialiseForm() {
     } else {
       textbox.style.color = "var(--text-color)";
     }
+
+    if (this.value.trim() === "") {
+      hideSubcategories();
+    }
   });
 }
 
@@ -381,17 +452,27 @@ function filterCategories(partialCategory) {
   const searchPattern = `category-nav-${partialCategory.toLowerCase()}`;
 
   Array.from(navElements).forEach((nav) => {
-    if (!nav.id.toLowerCase().includes(searchPattern)) {
+    const isSubcategory = nav.classList.contains("subcategory");
+
+    // Check if the ID matches the search pattern
+    const idMatches = nav.id.toLowerCase().includes(searchPattern);
+
+    // If it's a subcategory, check if the partial category includes a colon
+    if (isSubcategory && !partialCategory.includes(":")) {
+      nav.classList.add("hidden");
+    } else if (idMatches) {
+      nav.classList.remove("hidden");
+    } else {
       nav.classList.add("hidden");
       currentCategory = null;
-    } else {
-      nav.classList.remove("hidden");
     }
   });
 }
 
 function showAllCategories() {
-  const navElements = document.getElementsByClassName("nav-element");
+  const navElements = document.getElementsByClassName(
+    "nav-element:not(.hidden)"
+  );
 
   Array.from(navElements).forEach((nav) => {
     nav.classList.remove("hidden");
@@ -401,75 +482,72 @@ function showAllCategories() {
 }
 
 function selectNav(direction) {
-  const navElements = document.querySelectorAll(".nav-element:not(.hidden)");
-  const logContainers = document.querySelectorAll(".category-log-container");
-  const textbox = document.getElementById("textbox");
+  if(currentCategory == null) { // Explicit check for null or undefined
+    direction = 0;
+  }
+  const navElements = Array.from(
+    document.querySelectorAll(".nav-element:not(.hidden)")
+  );
+  const logContainers = Array.from(
+    document.querySelectorAll(".category-log-container")
+  );
   textbox.style.color = "var(--text-color)";
   unselectAllLogs();
 
-  if (currentCategory == null) {
-    currentCategory = 0;
-  } else {
-    if (
-      currentCategory + direction >= navElements.length ||
-      currentCategory + direction < 0
-    ) {
-      return;
-    } else {
-      currentCategory = currentCategory + direction;
-    }
-  }
+  currentCategory = (currentCategory ?? 0) + direction;
+  if (currentCategory < 0 || currentCategory >= navElements.length) return;
 
+  resetNavElementsStyle(navElements);
+
+  const selectedNavElement = navElements[currentCategory];
+  if (selectedNavElement) {
+    highlightSelectedNavElement(selectedNavElement);
+
+    const categoryName = selectedNavElement.getAttribute("data-category-nav");
+    updateLogContainersVisibility(categoryName, logContainers);
+
+    updateTextboxForCategory(categoryName);
+  } else {
+    setTimeout(() => selectNav(0), 20);
+  }
+  focusText();
+}
+
+function resetNavElementsStyle(navElements) {
   navElements.forEach((div) => {
     div.style.backgroundColor = "";
     div.style.color = "";
   });
+}
 
-  if (navElements[currentCategory]) {
-    navElements[currentCategory].style.backgroundColor = "var(--theme-color)";
-    navElements[currentCategory].style.color = "white";
+function highlightSelectedNavElement(navElement) {
+  navElement.style.backgroundColor = "var(--theme-color)";
+  navElement.style.color = "white";
+  navElement.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
 
-    navElements[currentCategory].scrollIntoView({
-      behavior: "smooth",
-      block: "nearest",
-    });
+function updateLogContainersVisibility(categoryName, logContainers) {
+  logContainers.forEach((div) => div.classList.add("hidden"));
+  document
+    .getElementById(`category-logs-${categoryName}`)
+    //.classList.remove("hidden");
+}
 
-    let categoryName =
-      navElements[currentCategory].getAttribute("data-category-nav");
-    let currentLogContainer = document.getElementById(
-      `category-logs-${categoryName}`
-    );
-    logContainers.forEach((div) => {
-      div.classList.add("hidden");
-    });
-    currentLogContainer.classList.remove("hidden");
-
-    if (categoryName != "notes") {
-      textbox.value = "";
-      textbox.value = `/${categoryName} `;
-      setTimeout(() => {
-        textbox.selectionStart = textbox.selectionEnd = textbox.value.length;
-      }, 3);
-    } else {
-      textbox.value = "";
-    }
-  } else {
+function updateTextboxForCategory(categoryName) {
+  textbox.value = categoryName !== "notes" ? `/${categoryName} ` : "";
+  if (categoryName !== "notes") {
     setTimeout(() => {
-      selectNav(0);
-    }, 20);
+      textbox.selectionStart = textbox.selectionEnd = textbox.value.length;
+    }, 3);
   }
-
-  focusText();
 }
 
 function scrollToTopOfLog() {
   const logContainer = document.getElementById("log-container");
-  logContainer.scrollTo(0,0);
+  logContainer.scrollTo(0, 0);
 }
 
 function selectLog(down) {
-  const textbox = document.getElementById("textbox");
-
   let logs = document.querySelectorAll(
     `.category-log-container:not(.hidden) input`
   );
@@ -515,7 +593,8 @@ function selectLog(down) {
   currentSelectedLog.addEventListener("input", editLogHandler);
   currentSelectedLog.focus();
   setTimeout(() => {
-    currentSelectedLog.selectionStart = currentSelectedLog.selectionEnd = currentSelectedLog.value.length;
+    currentSelectedLog.selectionStart = currentSelectedLog.selectionEnd =
+      currentSelectedLog.value.length;
   }, 10);
 
   currentSelectedLog.scrollIntoView({
@@ -544,8 +623,6 @@ function selectLog(down) {
 }
 
 function selectBoundingLog(top) {
-  const textbox = document.getElementById("textbox");
-
   let logs = document.querySelectorAll(
     `.category-log-container:not(.hidden) input`
   );
@@ -561,8 +638,6 @@ function selectBoundingLog(top) {
     currentSelectedLog.blur();
   }
 
-  
-  // Select the last log
   if (top) {
     selectedIndex = 0;
   } else {
@@ -573,7 +648,8 @@ function selectBoundingLog(top) {
   currentSelectedLog.addEventListener("input", editLogHandler);
   currentSelectedLog.focus();
   setTimeout(() => {
-    currentSelectedLog.selectionStart = currentSelectedLog.selectionEnd = currentSelectedLog.value.length;
+    currentSelectedLog.selectionStart = currentSelectedLog.selectionEnd =
+      currentSelectedLog.value.length;
   }, 10);
 
   currentSelectedLog.scrollIntoView({
@@ -585,15 +661,17 @@ function selectBoundingLog(top) {
     const scrollableContainer = currentSelectedLog.parentElement;
     const buffer = 20;
 
-    // Adjust scrolling if necessary
     if (scrollableContainer.scrollLeft > currentSelectedLog.offsetLeft) {
       scrollableContainer.scrollLeft = currentSelectedLog.offsetLeft - buffer;
     } else {
-      const rightEdge = currentSelectedLog.offsetLeft + currentSelectedLog.offsetWidth;
-      const scrollRightEdge = scrollableContainer.scrollLeft + scrollableContainer.offsetWidth;
+      const rightEdge =
+        currentSelectedLog.offsetLeft + currentSelectedLog.offsetWidth;
+      const scrollRightEdge =
+        scrollableContainer.scrollLeft + scrollableContainer.offsetWidth;
 
       if (rightEdge > scrollRightEdge) {
-        scrollableContainer.scrollLeft = rightEdge - scrollableContainer.offsetWidth + buffer;
+        scrollableContainer.scrollLeft =
+          rightEdge - scrollableContainer.offsetWidth + buffer;
       }
     }
   }, 20);
@@ -604,13 +682,11 @@ function editLogHandler() {
   const category = this.getAttribute("data-category");
   const id = this.getAttribute("data-log-id");
 
-  // Clear the existing timer if it exists
   if (debounceTimer) clearTimeout(debounceTimer);
 
-  // Set a new timer
   debounceTimer = setTimeout(() => {
     editLog(content, category, id);
-  }, 500); // Delay in milliseconds, adjust as needed
+  }, 500);
 }
 
 function editLog(content, category, id) {
@@ -652,70 +728,66 @@ function deleteLog() {
 }
 
 function markDone() {
-  let selectedLog = document.querySelector(".log-item.selected");
-  let logData = [];
+  const selectedLog = document.querySelector(".log-item.selected");
+  if (!selectedLog) return;
 
-    let logCategory = selectedLog.getAttribute("data-category");
-    let logId = parseInt(selectedLog.getAttribute("data-log-id"));
-    logData.push({ logCategory, logId });
+  const logCategory = selectedLog.getAttribute("data-category");
+  const logId = parseInt(selectedLog.getAttribute("data-log-id"));
+  const logStatus = selectedLog.getAttribute("data-log-status");
+  const logData = [{ logCategory, logId }];
 
-    let logStatus = selectedLog.getAttribute("data-log-status");
+  selectedLog.setAttribute(
+    "data-log-status",
+    logStatus === "active" ? "done" : "active"
+  );
+  selectedLog.disabled = logStatus === "active";
 
-    let doneLogs = Array.from(
-      document.querySelectorAll(
-        `.log-item[data-category="${logCategory}"][data-log-status="done"]`
-      )
-    );
-    let activeLogs = Array.from(
-      document.querySelectorAll(
-        `.log-item[data-category="${logCategory}"][data-log-status="active"]`
-      )
-    );
+  const shouldMoveSelection = shouldSelectNextLog(
+    logCategory,
+    logId,
+    logStatus
+  );
+  if (shouldMoveSelection) {
+    selectLog(logStatus === "active");
+  }
 
-    if (logStatus === "active") {
-      selectedLog.disabled = true;
-      let isLastActiveLog =
-        logStatus === "active" && selectedLog === activeLogs[activeLogs.length - 1];
-      let firstDoneLog = document.querySelector(
-        `.log-item[data-category="${logCategory}"][data-log-status="done"]`
-      );
-      let firstDoneLogId = firstDoneLog
-        ? parseInt(firstDoneLog.getAttribute("data-log-id"))
-        : Infinity;
+  reorderLogsInCategory(logCategory);
 
-      if (!(isLastActiveLog && logId < firstDoneLogId)) {
-        selectLog(true);
-      }
-    }
-
-    if (logStatus === "done") {
-      selectedLog.disabled = false;
-      let isFirstDoneLog = logStatus === "done" && selectedLog === doneLogs[0];
-      let lastActiveLog =
-        activeLogs.length > 0 ? activeLogs[activeLogs.length - 1] : null;
-      let lastActiveLogId = lastActiveLog
-        ? parseInt(lastActiveLog.getAttribute("data-log-id"))
-        : -Infinity;
-
-      if (!(isFirstDoneLog && logId > lastActiveLogId)) {
-        selectLog(false);
-      }
-    }
-
-    selectedLog.setAttribute(
-      "data-log-status",
-      logStatus === "active" ? "done" : "active"
-    );
-
-    reorderLogsInCategory(logCategory);
-
-  let postActionLog = document.querySelector(".log-item.selected");
-  setTimeout(() => {
-    postActionLog.focus();
-    postActionLog.selectionStart = postActionLog.selectionEnd = postActionLog.value.length;
-  }, 10);
+  focusOnSelectedLog();
 
   window.electronAPI.markDone(logData);
+}
+
+function shouldSelectNextLog(logCategory, logId, currentStatus) {
+  const logs = Array.from(
+    document.querySelectorAll(`.log-item[data-category="${logCategory}"]`)
+  );
+  const currentIndex = logs.findIndex(
+    (log) => parseInt(log.getAttribute("data-log-id")) === logId
+  );
+
+  if (currentStatus === "active") {
+    return (
+      currentIndex < logs.length - 1 ||
+      logs[currentIndex + 1].getAttribute("data-log-status") === "done"
+    );
+  } else {
+    return (
+      currentIndex > 0 ||
+      logs[currentIndex - 1].getAttribute("data-log-status") === "active"
+    );
+  }
+}
+
+function focusOnSelectedLog() {
+  const postActionLog = document.querySelector(".log-item.selected");
+  if (!postActionLog) return;
+
+  setTimeout(() => {
+    postActionLog.focus();
+    postActionLog.selectionStart = postActionLog.selectionEnd =
+      postActionLog.value.length;
+  }, 10);
 }
 
 function reorderLogsInCategory(category) {
@@ -743,4 +815,11 @@ function reorderLogsInCategory(category) {
   });
 
   logsArray.forEach((log) => categoryContainer.appendChild(log));
+}
+
+function hideSubcategories() {
+  subcategories = document.querySelectorAll(".subcategory");
+  subcategories.forEach((subCat) => {
+    subCat.classList.add("hidden");
+  });
 }

@@ -80,6 +80,7 @@ body {
   margin: 0 0 0 4px;
   border-radius: 5px 5px 0 0;
   scroll-margin: 10px;
+  text-wrap: nowrap;
 }
 
 #category-container .hidden {
