@@ -288,6 +288,7 @@ function registerShortcuts() {
   const escapeShortcut = "Escape";
 
   globalShortcut.register(editorShortcut, () => {
+    checkJSON();
     if (!win.isVisible()) {
       showMiniEditor();
     } else if (win.isVisible()) {
@@ -296,6 +297,7 @@ function registerShortcuts() {
   });
 
   globalShortcut.register(bigEditorShortcut, () => {
+    checkJSON();
     if (!win.isVisible()) {
       showBigEditor();
     } else {
@@ -375,11 +377,9 @@ ipcMain.on("text-submitted", (event, formData) => {
       if (pathParts.length > 1) {
         subCategory = `${category}:${pathParts[1].toLowerCase()}`;
       }
-
       content = splitData.slice(1).join(" ");
     }
 
-    // Create or update main category
     let categoryObj = json.categories.find(cat => cat.name === category);
     if (!categoryObj) {
       categoryObj = {
@@ -389,10 +389,8 @@ ipcMain.on("text-submitted", (event, formData) => {
       };
       json.categories.push(categoryObj);
     } else {
-      // Reactivate the category if it was deleted
       if (categoryObj.status === "deleted") {
         categoryObj.status = "active";
-        // Also reactivate all its subcategories
         json.categories.forEach(cat => {
           if (cat.name.startsWith(category + ':') && cat.status === "deleted") {
             cat.status = "active";
@@ -401,7 +399,6 @@ ipcMain.on("text-submitted", (event, formData) => {
       }
     }
 
-    // Handle subcategory
     if (subCategory) {
       let subCategoryObj = json.categories.find(cat => cat.name === subCategory);
       if (!subCategoryObj) {
@@ -412,16 +409,13 @@ ipcMain.on("text-submitted", (event, formData) => {
         };
         json.categories.push(subCategoryObj);
       } else {
-        // Reactivate the subcategory if it was deleted
         if (subCategoryObj.status === "deleted") {
           subCategoryObj.status = "active";
         }
       }
-      // Point to the subcategory object
       categoryObj = subCategoryObj;
     }
 
-    // Create log if content is not empty
     if (content != "") {
       const newLog = {
         id: categoryObj.logs.length + 1,
@@ -449,15 +443,14 @@ ipcMain.on("modify-log-edit", (event, logDataArray) => {
 
     logDataArray.forEach((logData) => {
       let categoryObj = json.categories.find(
-        (cat) => cat.name === logData.category  // Changed from logData.logCategory
+        (cat) => cat.name === logData.category
       );
       if (categoryObj) {
         let logObj = categoryObj.logs.find(
-          (log) => log.id.toString() === logData.id  // Changed from logData.logId
+          (log) => log.id.toString() === logData.id
         );
         if (logObj) {
-          logObj.content = logData.content;  // Update the content instead of setting status to 'deleted'
-          // You can add more fields to update here if necessary
+          logObj.content = logData.content;
         }
       }
     });
@@ -526,7 +519,6 @@ ipcMain.on("modify-category-delete", (event, categoryName) => {
 
     let json = JSON.parse(data);
 
-    // Mark the specified category and its subcategories as deleted
     json.categories.forEach(cat => {
       if (cat.name === categoryName || cat.name.startsWith(categoryName + ':')) {
         cat.status = "deleted";
