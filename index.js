@@ -99,11 +99,11 @@ function createWindow() {
 
   win = new BrowserWindow({
     width: 800,
-    height: miniHeight,
+    height: 90,
     x: width - 820,
     y: 20,
     frame: false,
-    resizable: true,
+    resizable: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -310,8 +310,6 @@ function registerShortcuts() {
 
 function showMiniEditor() {
   serveLogs();
-  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  win.setPosition(width - 820, 20);
   win.webContents.executeJavaScript("clearText()");
   win.show();
   win.setSize(800, miniHeight);
@@ -319,9 +317,6 @@ function showMiniEditor() {
 }
 
 function showBigEditor() {
-  serveLogs();
-  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  win.setPosition(width - 820, 20);
   win.webContents.executeJavaScript("clearText()");
   win.show();
   win.setSize(800, bigHeight);
@@ -351,7 +346,7 @@ ipcMain.on("refresh-logs", (event) => {
 
 ipcMain.on("text-submitted", (event, formData) => {
   let size = win.getSize();
-  if (size[0] === 800 && size[1] === 90) {
+  if (size[1] < 200) {
     win.blur();
   }
 

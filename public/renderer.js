@@ -41,9 +41,7 @@ window.addEventListener("keydown", function (event) {
 
   function resetNavigationAndTextbox() {
     clearText();
-    setTimeout(() => {
-      selectNav(0);
-    }, 20);
+    setTimeout(() => { selectNav(0); }, 20);
   }
 
   function handleTabNavigation() {
@@ -66,11 +64,13 @@ window.addEventListener("keydown", function (event) {
     if (textbox.value === "delete:" || textbox.value === "empty:") {
       resetNavigationAndTextbox();
     } else if (textbox.value.match(/^\/\w+:[^ ]+ $/)) {
-      textbox.value =
-        textbox.value.substring(0, textbox.value.lastIndexOf(":")) + " ";
-      setTimeout(() => {
-        selectNav(0);
-      }, 20);
+      const navElements = Array.from(document.querySelectorAll(".nav-element:not(.hidden)"));
+      resetNavElementsStyle(navElements);
+      textbox.value = textbox.value.substring(0, textbox.value.lastIndexOf(":")) + " ";
+      setTimeout(() => { selectNav(0); }, 20);
+    } else if (textbox.value.match(/^\/\w+:$/)) {
+      textbox.value = textbox.value.substring(0, textbox.value.lastIndexOf(":")) + " ";
+      setTimeout(() => { selectNav(0); }, 20);
     } else if (
       textbox.value.match(/^\/\w+:([^ ]+)? $/) ||
       textbox.value.match(/^\/\w+ $/)
@@ -118,10 +118,9 @@ window.addEventListener("keydown", function (event) {
     if (match) {
       let potentialCategory = match[1] + (match[2] ? ":" + match[2] : "");
       
-      // Check for an exact match in the categories array
       if (Array.isArray(categories) && categories.some(category => category === potentialCategory)) {
         event.preventDefault();
-        selectNav(0); // Call selectNav only if there's a direct match
+        selectNav(0);
       }
     }
   }
@@ -134,37 +133,31 @@ window.addEventListener("keyup", (event) => {
 function renderLogs(logs) {
   const categoryContainer = document.getElementById("category-container");
   const logContainer = document.getElementById("log-container");
-  categories = []; // Reset categories array
+  categories = [];
 
-  // Preparing containers for 'notes'
   prepareCategoryContainer("notes", categoryContainer, logContainer);
 
   if (!logs.categories || logs.categories.length === 0) {
     return;
   }
 
-  // Group categories and sort subcategories
   const categoryGroups = groupAndSortCategories(logs.categories);
 
   categoryGroups.forEach(group => {
     group.forEach(category => {
-      if (category.status === "deleted") {
-        return;
+      if (category.status === "deleted") { return; }
+
+      categories.push(category.name.toLowerCase());
+
+      let lcCategory = category.name.toLowerCase();
+      let [mainCategory, subCategory] = category.name.toLowerCase().split(':');
+
+      if (subCategory) {
+        mainCategories[mainCategory] = true;
       }
 
-    // Add category to the categories array
-    categories.push(category.name.toLowerCase());
-
-    let lcCategory = category.name.toLowerCase();
-    let match = /^(?:\w+):(\w+)$/.exec(lcCategory);
-
-    let [mainCategory, subCategory] = category.name.toLowerCase().split(':');
-    if (subCategory) {
-      mainCategories[mainCategory] = true; // Mark that this main category has subcategories
-    }
-
-    prepareCategoryNav(lcCategory, category, categoryContainer, mainCategories);
-    prepareCategoryLogContainer(lcCategory, category, logContainer);
+      prepareCategoryNav(lcCategory, category, categoryContainer, mainCategories);
+      prepareCategoryLogContainer(lcCategory, category, logContainer);
     });
   });
   markMainCategoriesWithSubcategories();
@@ -172,7 +165,6 @@ function renderLogs(logs) {
 }
 
 function prepareCategoryContainer(categoryName, categoryContainer, logContainer) {
-  // Handle the special case for 'notes' or any other similar cases
   let categoryNav = document.getElementById(`category-nav-${categoryName}`);
   if (!categoryNav) {
     categoryNav = document.createElement("div");
@@ -201,13 +193,7 @@ function prepareCategoryNav(lcCategory, category, categoryContainer, mainCategor
     categoryNav.setAttribute("data-category-nav", lcCategory);
 
     let isSubcategory = lcCategory.includes(':');
-    let [mainCategory, subCategory] = lcCategory.split(':');
     let categoryName = category.name;
-
-    // Append bullet if this main category has subcategories
-    if (!isSubcategory && mainCategories[mainCategory]) {
-      categoryName += " &bull;";
-    }
 
     categoryNav.innerHTML = categoryName;
 
@@ -228,6 +214,14 @@ function prepareCategoryLogContainer(lcCategory, category, logContainer) {
     logContainer.appendChild(categoryLogsContainer);
   }
 
+  let containerHeader = document.getElementById(`${lcCategory}-header`);
+  if (!containerHeader) {
+    containerHeader = document.createElement("h2");
+    containerHeader.id = `${lcCategory}-header`;
+    containerHeader.textContent = `${lcCategory}`;
+    categoryLogsContainer.appendChild(containerHeader);
+  }
+
   if (category.logs.length > 0) {
     renderCategoryLogs(lcCategory, categoryLogsContainer, category.logs);
   }
@@ -239,9 +233,7 @@ function renderCategoryLogs(lcCategory, container, logs) {
   });
 
   sortedLogs.forEach((log) => {
-    if (log.status === "deleted") {
-      return;
-    }
+    if (log.status === "deleted") { return; }
 
     let logItem = document.getElementById(`${lcCategory}-log-${log.id}`);
     if (logItem) {
@@ -277,7 +269,7 @@ function markMainCategoriesWithSubcategories() {
     const mainCategoryNav = document.getElementById(`category-nav-${mainCategory}`);
     if (mainCategoryNav && !mainCategoryNav.classList.contains("has-subcategory")) {
       mainCategoryNav.innerHTML += " &bull;";
-      mainCategoryNav.classList.add("has-subcategory"); // Add marker class
+      mainCategoryNav.classList.add("has-subcategory");
     }
   }
 }
@@ -292,14 +284,12 @@ function groupAndSortCategories(categories) {
     categoryGroups[mainCategory].push(category);
   });
 
-  // Sort subcategories within each main category group
   Object.values(categoryGroups).forEach(group => {
     group.sort((a, b) => {
       return a.name.localeCompare(b.name);
     });
   });
 
-  // Flatten the grouped categories into an array of arrays (each group as an array)
   return Object.values(categoryGroups);
 }
 
@@ -309,9 +299,7 @@ function displayError(err) {
   errorMessage.style.display = "flex";
   textbox.focus();
 
-  setTimeout(() => {
-    errorMessage.style.display = "none";
-  }, 4000);
+  setTimeout(() => { errorMessage.style.display = "none"; }, 4000);
 }
 
 function initialiseForm() {
@@ -329,7 +317,6 @@ function initialiseForm() {
 
     if (isInvalidCategory) {
       displayError("A blank category name? Not allowed I'm afraid.");
-
       return;
     } else {
       errorMessage.style.display = "none";
@@ -337,13 +324,14 @@ function initialiseForm() {
 
     if (textboxValue.startsWith("delete:")) {
       let categoryToDelete = textboxValue.substring(7).toLowerCase();
+
       if (categoryToDelete === "notes") {
         displayError("You can't delete the notes category!");
         return;
       }
-      let categoryExists = categories.some(
-        (cat) => cat.name === categoryToDelete
-      );
+
+      let categoryExists = categories.some( (cat) => cat.name === categoryToDelete );
+
       if (categoryExists) {
         window.electronAPI.deleteCategory(categoryToDelete);
         removeCategoryElements(categoryToDelete);
@@ -367,21 +355,22 @@ function initialiseForm() {
       const splitData = textboxValue.split(" ");
       category = splitData[0].substring(1);
       content = splitData.slice(1).join(" ");
+
       if (content == "/d") {
         window.electronAPI.deleteCategory(category);
         removeCategoryElements(category);
         clearText();
+        location.reload();
       } else if (content == "/e") {
         window.electronAPI.emptyCategory(category);
         document
           .querySelectorAll(`[id^='${category}-log-']`)
-          .forEach((element) => {
-            element.remove();
-          });
+          .forEach((element) => { element.remove(); });
         textbox.value = `/${category} `;
       } else if (content.startsWith("/m")) {
         const mRegex = /^\/m(\d+)$/;
         const match = content.match(mRegex);
+        
         if (match && match[1]) {
           const number = parseInt(match[1], 10);
           window.electronAPI.moveCategory(category, number);
@@ -401,9 +390,7 @@ function initialiseForm() {
       window.electronAPI.sendText(textboxValue);
       textbox.value = ``;
     }
-    setTimeout(() => {
-      selectNav(0);
-    }, 5);
+    setTimeout(() => { selectNav(0); }, 5);
   });
 
   function removeCategoryElements(categoryName) {
@@ -453,11 +440,8 @@ function filterCategories(partialCategory) {
 
   Array.from(navElements).forEach((nav) => {
     const isSubcategory = nav.classList.contains("subcategory");
-
-    // Check if the ID matches the search pattern
     const idMatches = nav.id.toLowerCase().includes(searchPattern);
 
-    // If it's a subcategory, check if the partial category includes a colon
     if (isSubcategory && !partialCategory.includes(":")) {
       nav.classList.add("hidden");
     } else if (idMatches) {
@@ -474,10 +458,7 @@ function showAllCategories() {
     "nav-element:not(.hidden)"
   );
 
-  Array.from(navElements).forEach((nav) => {
-    nav.classList.remove("hidden");
-  });
-
+  Array.from(navElements).forEach((nav) => { nav.classList.remove("hidden"); });
   selectNav(-currentCategory);
 }
 
@@ -485,12 +466,8 @@ function selectNav(direction) {
   if(currentCategory == null) { // Explicit check for null or undefined
     direction = 0;
   }
-  const navElements = Array.from(
-    document.querySelectorAll(".nav-element:not(.hidden)")
-  );
-  const logContainers = Array.from(
-    document.querySelectorAll(".category-log-container")
-  );
+  const navElements = Array.from(document.querySelectorAll(".nav-element:not(.hidden)"));
+  const logContainers = Array.from(document.querySelectorAll(".category-log-container"));
   textbox.style.color = "var(--text-color)";
   unselectAllLogs();
 
@@ -528,17 +505,13 @@ function highlightSelectedNavElement(navElement) {
 
 function updateLogContainersVisibility(categoryName, logContainers) {
   logContainers.forEach((div) => div.classList.add("hidden"));
-  document
-    .getElementById(`category-logs-${categoryName}`)
-    //.classList.remove("hidden");
+  document.getElementById(`category-logs-${categoryName}`).classList.remove("hidden");
 }
 
 function updateTextboxForCategory(categoryName) {
   textbox.value = categoryName !== "notes" ? `/${categoryName} ` : "";
   if (categoryName !== "notes") {
-    setTimeout(() => {
-      textbox.selectionStart = textbox.selectionEnd = textbox.value.length;
-    }, 3);
+    setTimeout(() => { textbox.selectionStart = textbox.selectionEnd = textbox.value.length; }, 3);
   }
 }
 
@@ -557,10 +530,7 @@ function selectLog(down) {
 
   textbox.blur();
 
-  selectedIndex = currentSelectedLog
-    ? Array.from(logs).indexOf(currentSelectedLog)
-    : -1;
-
+  selectedIndex = currentSelectedLog ? Array.from(logs).indexOf(currentSelectedLog) : -1;
   selectedIndex += down ? 1 : -1;
 
   if (selectedIndex < 0) {
@@ -575,9 +545,7 @@ function selectLog(down) {
       });
     }
     textbox.focus();
-    setTimeout(() => {
-      textbox.selectionStart = textbox.selectionEnd = textbox.value.length;
-    }, 10);
+    setTimeout(() => { textbox.selectionStart = textbox.selectionEnd = textbox.value.length; }, 10);
     return;
   } else if (selectedIndex >= logs.length) {
     return;
@@ -592,10 +560,7 @@ function selectLog(down) {
   currentSelectedLog.classList.add("selected");
   currentSelectedLog.addEventListener("input", editLogHandler);
   currentSelectedLog.focus();
-  setTimeout(() => {
-    currentSelectedLog.selectionStart = currentSelectedLog.selectionEnd =
-      currentSelectedLog.value.length;
-  }, 10);
+  setTimeout(() => { currentSelectedLog.selectionStart = currentSelectedLog.selectionEnd = currentSelectedLog.value.length; }, 10);
 
   currentSelectedLog.scrollIntoView({
     behavior: "instant",
@@ -609,23 +574,18 @@ function selectLog(down) {
     if (scrollableContainer.scrollLeft > currentSelectedLog.offsetLeft) {
       scrollableContainer.scrollLeft = currentSelectedLog.offsetLeft - buffer;
     } else {
-      const rightEdge =
-        currentSelectedLog.offsetLeft + currentSelectedLog.offsetWidth;
-      const scrollRightEdge =
-        scrollableContainer.scrollLeft + scrollableContainer.offsetWidth;
+      const rightEdge = currentSelectedLog.offsetLeft + currentSelectedLog.offsetWidth;
+      const scrollRightEdge = scrollableContainer.scrollLeft + scrollableContainer.offsetWidth;
 
       if (rightEdge > scrollRightEdge) {
-        scrollableContainer.scrollLeft =
-          rightEdge - scrollableContainer.offsetWidth + buffer;
+        scrollableContainer.scrollLeft = rightEdge - scrollableContainer.offsetWidth + buffer;
       }
     }
   }, 20);
 }
 
 function selectBoundingLog(top) {
-  let logs = document.querySelectorAll(
-    `.category-log-container:not(.hidden) input`
-  );
+  let logs = document.querySelectorAll(`.category-log-container:not(.hidden) input`);
   if (logs.length === 0) {
     return;
   }
@@ -648,8 +608,7 @@ function selectBoundingLog(top) {
   currentSelectedLog.addEventListener("input", editLogHandler);
   currentSelectedLog.focus();
   setTimeout(() => {
-    currentSelectedLog.selectionStart = currentSelectedLog.selectionEnd =
-      currentSelectedLog.value.length;
+    currentSelectedLog.selectionStart = currentSelectedLog.selectionEnd = currentSelectedLog.value.length;
   }, 10);
 
   currentSelectedLog.scrollIntoView({
@@ -664,14 +623,11 @@ function selectBoundingLog(top) {
     if (scrollableContainer.scrollLeft > currentSelectedLog.offsetLeft) {
       scrollableContainer.scrollLeft = currentSelectedLog.offsetLeft - buffer;
     } else {
-      const rightEdge =
-        currentSelectedLog.offsetLeft + currentSelectedLog.offsetWidth;
-      const scrollRightEdge =
-        scrollableContainer.scrollLeft + scrollableContainer.offsetWidth;
+      const rightEdge = currentSelectedLog.offsetLeft + currentSelectedLog.offsetWidth;
+      const scrollRightEdge = scrollableContainer.scrollLeft + scrollableContainer.offsetWidth;
 
       if (rightEdge > scrollRightEdge) {
-        scrollableContainer.scrollLeft =
-          rightEdge - scrollableContainer.offsetWidth + buffer;
+        scrollableContainer.scrollLeft = rightEdge - scrollableContainer.offsetWidth + buffer;
       }
     }
   }, 20);
@@ -698,9 +654,7 @@ function editLog(content, category, id) {
 function unselectAllLogs() {
   currentSelectedLog = null;
   let selectedLogs = document.querySelectorAll(".log-item.selected");
-  selectedLogs.forEach((log) => {
-    log.classList.remove("selected");
-  });
+  selectedLogs.forEach((log) => { log.classList.remove("selected"); });
 }
 
 function deleteLog() {
@@ -711,9 +665,7 @@ function deleteLog() {
     let logCategory = log.getAttribute("data-category");
     let logId = log.getAttribute("data-log-id");
     logData.push({ logCategory, logId });
-    let logs = document.querySelectorAll(
-      `.log-item[data-category="${logCategory}"]`
-    );
+    let logs = document.querySelectorAll(`.log-item[data-category="${logCategory}"]`);
     if (selectedIndex + 1 === logs.length) {
       selectLog(false);
     } else {
@@ -736,45 +688,28 @@ function markDone() {
   const logStatus = selectedLog.getAttribute("data-log-status");
   const logData = [{ logCategory, logId }];
 
-  selectedLog.setAttribute(
-    "data-log-status",
-    logStatus === "active" ? "done" : "active"
-  );
+  selectedLog.setAttribute("data-log-status", logStatus === "active" ? "done" : "active");
   selectedLog.disabled = logStatus === "active";
 
-  const shouldMoveSelection = shouldSelectNextLog(
-    logCategory,
-    logId,
-    logStatus
-  );
+  const shouldMoveSelection = shouldSelectNextLog(logCategory, logId, logStatus);
   if (shouldMoveSelection) {
     selectLog(logStatus === "active");
   }
 
   reorderLogsInCategory(logCategory);
-
   focusOnSelectedLog();
-
   window.electronAPI.markDone(logData);
 }
 
 function shouldSelectNextLog(logCategory, logId, currentStatus) {
-  const logs = Array.from(
-    document.querySelectorAll(`.log-item[data-category="${logCategory}"]`)
-  );
-  const currentIndex = logs.findIndex(
-    (log) => parseInt(log.getAttribute("data-log-id")) === logId
-  );
+  const logs = Array.from(document.querySelectorAll(`.log-item[data-category="${logCategory}"]`));
+  const currentIndex = logs.findIndex((log) => parseInt(log.getAttribute("data-log-id")) === logId);
 
   if (currentStatus === "active") {
-    return (
-      currentIndex < logs.length - 1 ||
-      logs[currentIndex + 1].getAttribute("data-log-status") === "done"
+    return (currentIndex < logs.length - 1 || logs[currentIndex + 1].getAttribute("data-log-status") === "done"
     );
   } else {
-    return (
-      currentIndex > 0 ||
-      logs[currentIndex - 1].getAttribute("data-log-status") === "active"
+    return ( currentIndex > 0 || logs[currentIndex - 1].getAttribute("data-log-status") === "active"
     );
   }
 }
@@ -785,8 +720,7 @@ function focusOnSelectedLog() {
 
   setTimeout(() => {
     postActionLog.focus();
-    postActionLog.selectionStart = postActionLog.selectionEnd =
-      postActionLog.value.length;
+    postActionLog.selectionStart = postActionLog.selectionEnd = postActionLog.value.length;
   }, 10);
 }
 
@@ -819,7 +753,5 @@ function reorderLogsInCategory(category) {
 
 function hideSubcategories() {
   subcategories = document.querySelectorAll(".subcategory");
-  subcategories.forEach((subCat) => {
-    subCat.classList.add("hidden");
-  });
+  subcategories.forEach((subCat) => { subCat.classList.add("hidden"); });
 }
