@@ -367,7 +367,7 @@ function initialiseForm() {
       let pomAction = textboxValue.substring(4).toLowerCase();
       const parsedTime = parseInt(pomAction);
         if (!isNaN(parsedTime) && parsedTime > 0) {
-          pomodoroCategory = category;
+          pomodoroCategory = "";
           startPomodoroTimer(parsedTime);
         } else if (pomAction === "pause") {
           pausePomodoroTimer();
@@ -546,11 +546,11 @@ function stopPomodoroTimer() {
   if (pomodoroTimerId) {
     clearInterval(pomodoroTimerId);
   }
+  pomodoroCategory = "";
   pomodoroTimerId = null;
   isTimerPaused = false;
   timeLeftInSeconds = 0;
   document.getElementById("timer-display").style.display = null;
-  pomodoroCategory = null;
   window.electronAPI.requestHide();
 }
 
@@ -565,10 +565,10 @@ function updateTimerDisplay() {
   } else if (!isTimerPaused) {
     const minutes = Math.floor(timeLeftInSeconds / 60);
     const seconds = timeLeftInSeconds % 60;
-    if (pomodoroCategory != null || pomodoroCategory != ""){
-      display.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    } else {
+    if (pomodoroCategory != null && pomodoroCategory != "") {
       display.textContent = `/${pomodoroCategory} ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    } else {
+        display.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
     }
     timeLeftInSeconds--;
   }
@@ -577,7 +577,6 @@ function updateTimerDisplay() {
 function playChime() {
   const chime = new Audio('assets/chime.mp3');
   chime.play();
-
   pomodoroCategory = null;
 }
 

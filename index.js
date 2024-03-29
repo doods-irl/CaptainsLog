@@ -111,7 +111,7 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      devTools: true,
+      devTools: false,
     },
     skipTaskbar: true,
   });
@@ -159,7 +159,7 @@ function createSetupWindow() {
 function createTutorialWindow() {
   tutorialWin = new BrowserWindow({
     width: 800,
-    height: 800,
+    height: 1000,
     frame: false,
     resizable: false,
     icon: "favicon.ico",
