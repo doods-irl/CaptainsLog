@@ -293,18 +293,24 @@ function groupAndSortCategories(categories) {
   return Object.values(categoryGroups);
 }
 
-function displayError(err) {
+function displayError(err, duration) {
   const errorMessage = document.getElementById("error-message");
   errorMessage.textContent = err;
   errorMessage.style.display = "flex";
   textbox.focus();
 
-  setTimeout(() => { errorMessage.style.display = "none"; }, 4000);
+  setTimeout(() => { errorMessage.style.display = "none"; }, duration);
 }
+
+let isConfirmationPending = false;
+let confirmationTimeout;
+let isConfirmationPendingForEmpty = false;
+let confirmationTimeoutForEmpty;
 
 function initialiseForm() {
   const textForm = document.getElementById("text-form");
   const errorMessage = document.getElementById("error-message");
+
   let category;
 
   textForm.addEventListener("submit", (event) => {
@@ -316,7 +322,7 @@ function initialiseForm() {
     const isInvalidCategory = invalidCategoryRegex.test(textboxValue);
 
     if (isInvalidCategory) {
-      displayError("A blank category name? Not allowed I'm afraid.");
+      displayError("A blank category name? Not allowed I'm afraid.", 4000);
       return;
     } else {
       errorMessage.style.display = "none";
@@ -326,7 +332,7 @@ function initialiseForm() {
       let categoryToDelete = textboxValue.substring(7).toLowerCase();
 
       if (categoryToDelete === "notes") {
-        displayError("You can't delete the notes category!");
+        displayError("You can't delete the notes category!", 4000);
         return;
       }
 
@@ -337,7 +343,7 @@ function initialiseForm() {
         removeCategoryElements(categoryToDelete);
         textbox.value = "delete:";
       } else {
-        displayError(`Category '${categoryToDelete}' not found.`);
+        displayError(`Category '${categoryToDelete}' not found.`, 4000);
       }
     } else if (textboxValue.startsWith("empty:")) {
       let categoryToEmpty = textboxValue.substring(6).toLowerCase();
@@ -349,7 +355,7 @@ function initialiseForm() {
         document.getElementById(`category-logs-${categoryToEmpty}`).remove();
         textbox.value = "empty:";
       } else {
-        displayError(`Category '${categoryToEmpty}' not found.`);
+        displayError(`Category '${categoryToEmpty}' not found.`, 4000);
       }
     } else if (textboxValue.startsWith("/")) {
       const splitData = textboxValue.split(" ");
@@ -357,16 +363,34 @@ function initialiseForm() {
       content = splitData.slice(1).join(" ");
 
       if (content == "/d") {
-        window.electronAPI.deleteCategory(category);
-        removeCategoryElements(category);
-        clearText();
-        location.reload();
+        if (!isConfirmationPending) {
+          displayError(`Type /d and enter again to confirm category deletion.`, 8000);
+          isConfirmationPending = true;
+          confirmationTimeout = setTimeout(() => {
+            isConfirmationPending = false;
+          }, 8000);
+        } else {
+          clearTimeout(confirmationTimeout);
+          window.electronAPI.deleteCategory(category);
+          removeCategoryElements(category);
+          clearText();
+          location.reload();
+          isConfirmationPending = false;
+        }
       } else if (content == "/e") {
-        window.electronAPI.emptyCategory(category);
-        document
-          .querySelectorAll(`[id^='${category}-log-']`)
-          .forEach((element) => { element.remove(); });
-        textbox.value = `/${category} `;
+        if (!isConfirmationPendingForEmpty) {
+          displayError(`Type /e and enter again to confirm category empty.`, 8000);
+          isConfirmationPendingForEmpty = true;
+          confirmationTimeoutForEmpty = setTimeout(() => {
+            isConfirmationPendingForEmpty = false;
+          }, 8000);
+        } else {
+          clearTimeout(confirmationTimeoutForEmpty);
+          window.electronAPI.emptyCategory(category);
+          document.querySelectorAll(`[id^='${category}-log-']`).forEach((element) => { element.remove(); });
+          textbox.value = `/${category} `;
+          isConfirmationPendingForEmpty = false;
+        }
       } else if (content.startsWith("/m")) {
         const mRegex = /^\/m(\d+)$/;
         const match = content.match(mRegex);

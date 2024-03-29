@@ -104,10 +104,11 @@ function createWindow() {
     y: 20,
     frame: false,
     resizable: false,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      devTools: true,
+      devTools: false,
     },
     skipTaskbar: true,
   });
@@ -288,7 +289,6 @@ function registerShortcuts() {
   const escapeShortcut = "Escape";
 
   globalShortcut.register(editorShortcut, () => {
-    checkJSON();
     if (!win.isVisible()) {
       showMiniEditor();
     } else if (win.isVisible()) {
@@ -297,7 +297,6 @@ function registerShortcuts() {
   });
 
   globalShortcut.register(bigEditorShortcut, () => {
-    checkJSON();
     if (!win.isVisible()) {
       showBigEditor();
     } else {
@@ -305,9 +304,13 @@ function registerShortcuts() {
     }
   });
 
-  globalShortcut.register(escapeShortcut, () => {
-    win.blur();
-  });
+  if (win.isVisible()) {
+    globalShortcut.register(escapeShortcut, () => {
+      win.blur();
+    });
+  } else {
+    globalShortcut.unregister(escapeShortcut);
+  }
 }
 
 function showMiniEditor() {
