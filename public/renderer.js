@@ -144,6 +144,7 @@ function renderLogs(logs) {
   categories = [];
 
   prepareCategoryContainer("notes", categoryContainer, logContainer);
+  prepareCategoryLogContainer("notes", null, logContainer);
 
   if (!logs.categories || logs.categories.length === 0) {
     return;
@@ -235,7 +236,8 @@ function prepareCategoryLogContainer(lcCategory, category, logContainer) {
     categoryLogsContainer.appendChild(containerHeader);
   }
 
-  if (category.logs.length > 0) {
+  // Check if the category has logs and render them if it does
+  if (category && category.logs && category.logs.length > 0) {
     renderCategoryLogs(lcCategory, categoryLogsContainer, category.logs);
   }
 }

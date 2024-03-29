@@ -111,7 +111,7 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      devTools: false,
+      devTools: true,
     },
     skipTaskbar: true,
   });
