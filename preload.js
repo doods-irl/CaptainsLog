@@ -9,4 +9,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deleteCategory: (category) => ipcRenderer.send('modify-category-delete', category),
     emptyCategory: (category) => ipcRenderer.send('modify-category-empty', category),
     moveCategory: (content, number) => ipcRenderer.send('modify-category-move', content, number),
+    requestHide: () => ipcRenderer.send('request-hide'),
 });

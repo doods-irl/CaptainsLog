@@ -6,6 +6,14 @@ let currentSelectedLog = null;
 let keysPressed = {};
 let selectedIndex;
 let debounceTimer;
+let isConfirmationPending = false;
+let confirmationTimeout;
+let isConfirmationPendingForEmpty = false;
+let confirmationTimeoutForEmpty;
+let pomodoroTimerId = null;
+let timeLeftInSeconds = 0;
+let isTimerPaused = false;
+let pomodoroCategory = null;
 
 document.addEventListener("DOMContentLoaded", () => {
   textbox = document.getElementById("textbox");
@@ -162,6 +170,11 @@ function renderLogs(logs) {
   });
   markMainCategoriesWithSubcategories();
   selectNav(0);
+
+  if(pomodoroCategory != null && pomodoroCategory != "") {
+    filterCategories(pomodoroCategory);
+    selectNav(1);
+  }
 }
 
 function prepareCategoryContainer(categoryName, categoryContainer, logContainer) {
@@ -302,11 +315,6 @@ function displayError(err, duration) {
   setTimeout(() => { errorMessage.style.display = "none"; }, duration);
 }
 
-let isConfirmationPending = false;
-let confirmationTimeout;
-let isConfirmationPendingForEmpty = false;
-let confirmationTimeoutForEmpty;
-
 function initialiseForm() {
   const textForm = document.getElementById("text-form");
   const errorMessage = document.getElementById("error-message");
@@ -347,9 +355,7 @@ function initialiseForm() {
       }
     } else if (textboxValue.startsWith("empty:")) {
       let categoryToEmpty = textboxValue.substring(6).toLowerCase();
-      let categoryExists = categories.some(
-        (cat) => cat.name === categoryToEmpty
-      );
+      let categoryExists = categories.includes(categoryToEmpty);
       if (categoryExists) {
         window.electronAPI.emptyCategory(categoryToEmpty);
         document.getElementById(`category-logs-${categoryToEmpty}`).remove();
@@ -357,12 +363,32 @@ function initialiseForm() {
       } else {
         displayError(`Category '${categoryToEmpty}' not found.`, 4000);
       }
+    } else if (textboxValue.startsWith("pom:")) {
+      let pomAction = textboxValue.substring(4).toLowerCase();
+      const parsedTime = parseInt(pomAction);
+        if (!isNaN(parsedTime) && parsedTime > 0) {
+          pomodoroCategory = category;
+          startPomodoroTimer(parsedTime);
+        } else if (pomAction === "pause") {
+          pausePomodoroTimer();
+        } else if (pomAction === "stop") {
+          stopPomodoroTimer();
+        } else if (pomAction === "resume") {
+          resumePomodoroTimer();
+        } else {
+          displayError('Try "pom:[minutes]", "pom:pause", or "pom:stop".', 4000);
+        }
     } else if (textboxValue.startsWith("/")) {
       const splitData = textboxValue.split(" ");
       category = splitData[0].substring(1);
       content = splitData.slice(1).join(" ");
+      let categoryExists = categories.includes(category);
 
       if (content == "/d") {
+        if (!categoryExists) {
+          displayError(`This category doesn't exist.`, 4000);
+          return;
+        }
         if (!isConfirmationPending) {
           displayError(`Type /d and enter again to confirm category deletion.`, 8000);
           isConfirmationPending = true;
@@ -374,10 +400,13 @@ function initialiseForm() {
           window.electronAPI.deleteCategory(category);
           removeCategoryElements(category);
           clearText();
-          location.reload();
           isConfirmationPending = false;
         }
       } else if (content == "/e") {
+        if (!categoryExists) {
+          displayError(`This category doesn't exist.`, 4000);
+          return;
+        }
         if (!isConfirmationPendingForEmpty) {
           displayError(`Type /e and enter again to confirm category empty.`, 8000);
           isConfirmationPendingForEmpty = true;
@@ -392,15 +421,39 @@ function initialiseForm() {
           isConfirmationPendingForEmpty = false;
         }
       } else if (content.startsWith("/m")) {
+        if (!categoryExists) {
+          displayError(`This category doesn't exist.`, 4000);
+          return;
+        }
         const mRegex = /^\/m(\d+)$/;
         const match = content.match(mRegex);
         
         if (match && match[1]) {
           const number = parseInt(match[1], 10);
           window.electronAPI.moveCategory(category, number);
-          location.reload();
+          window.electronAPI.refreshLogs();
         } else {
           console.log("No valid number found after '/m'");
+        }
+      } else if (content.startsWith("pom:")) {
+        if (!categoryExists) {
+          displayError(`This category doesn't exist.`, 4000);
+          return;
+        }
+        let pomAction = content.substring(4).toLowerCase();
+        const parsedTime = parseInt(pomAction);
+      
+        if (!isNaN(parsedTime) && parsedTime > 0) {
+          pomodoroCategory = category;
+          startPomodoroTimer(parsedTime);
+        } else if (pomAction === "pause") {
+          pausePomodoroTimer();
+        } else if (pomAction === "stop") {
+          stopPomodoroTimer();
+        } else if (pomAction === "resume") {
+          resumePomodoroTimer();
+        } else {
+          displayError('Try "pom:[minutes]", "pom:pause", or "pom:stop".', 4000);
         }
       } else {
         window.electronAPI.sendText(textboxValue);
@@ -458,6 +511,76 @@ function initialiseForm() {
   });
 }
 
+function startPomodoroTimer(durationInMinutes) {
+  if (pomodoroTimerId) {
+    clearInterval(pomodoroTimerId);
+  }
+  timeLeftInSeconds = durationInMinutes * 60;
+  isTimerPaused = false;
+  document.getElementById("timer-display").style.display = 'block';
+
+  updateTimerDisplay();
+
+  pomodoroTimerId = setInterval(updateTimerDisplay, 1000);
+  window.electronAPI.requestHide();
+}
+
+function pausePomodoroTimer() {
+  if (pomodoroTimerId) {
+    clearInterval(pomodoroTimerId);
+    pomodoroTimerId = null;
+    isTimerPaused = true;
+  }
+  window.electronAPI.requestHide();
+}
+
+function resumePomodoroTimer() {
+  if (!pomodoroTimerId && isTimerPaused) {
+    isTimerPaused = false;
+    pomodoroTimerId = setInterval(updateTimerDisplay, 1000);
+  }
+  window.electronAPI.requestHide();
+}
+
+function stopPomodoroTimer() {
+  if (pomodoroTimerId) {
+    clearInterval(pomodoroTimerId);
+  }
+  pomodoroTimerId = null;
+  isTimerPaused = false;
+  timeLeftInSeconds = 0;
+  document.getElementById("timer-display").style.display = null;
+  pomodoroCategory = null;
+  window.electronAPI.requestHide();
+}
+
+function updateTimerDisplay() {
+  const display = document.getElementById("timer-display");
+  if (timeLeftInSeconds <= 0) {
+    clearInterval(pomodoroTimerId);
+    playChime();
+    pomodoroTimerId = null;
+    display.textContent = "";
+    display.style.display = null;
+  } else if (!isTimerPaused) {
+    const minutes = Math.floor(timeLeftInSeconds / 60);
+    const seconds = timeLeftInSeconds % 60;
+    if (pomodoroCategory != null || pomodoroCategory != ""){
+      display.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    } else {
+      display.textContent = `/${pomodoroCategory} ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+    timeLeftInSeconds--;
+  }
+}
+
+function playChime() {
+  const chime = new Audio('assets/chime.mp3');
+  chime.play();
+
+  pomodoroCategory = null;
+}
+
 function filterCategories(partialCategory) {
   const navElements = document.getElementsByClassName("nav-element");
   const searchPattern = `category-nav-${partialCategory.toLowerCase()}`;
@@ -487,7 +610,7 @@ function showAllCategories() {
 }
 
 function selectNav(direction) {
-  if(currentCategory == null) { // Explicit check for null or undefined
+  if(currentCategory == null) {
     direction = 0;
   }
   const navElements = Array.from(document.querySelectorAll(".nav-element:not(.hidden)"));

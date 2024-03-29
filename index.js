@@ -23,6 +23,9 @@ let filePath;
 let tray = null;
 let accentColor;
 let themeColor;
+const editorShortcut = "CommandOrControl+Alt+L";
+const bigEditorShortcut = "CommandOrControl+Alt+K";
+const escapeShortcut = "Escape";
 const singleInstanceLock = app.requestSingleInstanceLock();
 const appFolder = path.dirname(process.execPath);
 const exeName = path.resolve(appFolder, '..', `Captain's Log.exe`);
@@ -108,7 +111,7 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      devTools: false,
+      devTools: true,
     },
     skipTaskbar: true,
   });
@@ -119,11 +122,15 @@ function createWindow() {
 
   win.on("show", () => {
     serveLogs();
+    globalShortcut.register(escapeShortcut, () => {
+      win.blur();
+    });
   });
 
   win.on("blur", () => {
     win.webContents.executeJavaScript("clearText()");
     win.webContents.executeJavaScript("showAllCategories()");
+    globalShortcut.unregister(escapeShortcut);
     win.hide();
     win.setResizable(true);
     win.setSize(800, 70);
@@ -284,15 +291,11 @@ ipcMain.on("receive-setup-path", (event, receivedPath) => {
 });
 
 function registerShortcuts() {
-  const editorShortcut = "CommandOrControl+Alt+L";
-  const bigEditorShortcut = "CommandOrControl+Alt+K";
-  const escapeShortcut = "Escape";
-
   globalShortcut.register(editorShortcut, () => {
     if (!win.isVisible()) {
       showMiniEditor();
     } else if (win.isVisible()) {
-      showBigEditor();
+      win.setSize(800, bigHeight);
     }
   });
 
@@ -303,14 +306,6 @@ function registerShortcuts() {
       win.setSize(800, bigHeight);
     }
   });
-
-  if (win.isVisible()) {
-    globalShortcut.register(escapeShortcut, () => {
-      win.blur();
-    });
-  } else {
-    globalShortcut.unregister(escapeShortcut);
-  }
 }
 
 function showMiniEditor() {
@@ -322,6 +317,7 @@ function showMiniEditor() {
 }
 
 function showBigEditor() {
+  serveLogs();
   win.webContents.executeJavaScript("clearText()");
   win.show();
   win.setSize(800, bigHeight);
@@ -347,6 +343,13 @@ function serveLogs() {
 
 ipcMain.on("refresh-logs", (event) => {
   serveLogs();
+});
+
+ipcMain.on("request-hide", (event) => {
+  let size = win.getSize();
+  if (size[1] < 200) {
+    win.blur();
+  }
 });
 
 ipcMain.on("text-submitted", (event, formData) => {

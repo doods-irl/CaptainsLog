@@ -169,3 +169,11 @@ body {
   background-color: var(--theme-color);
   color: white;
 }
+
+#timer-display {
+  background-color: var(--theme-color);
+  text-align: center;
+  font-weight: 600;
+  color: white;
+  display: none;
+}
