@@ -69,21 +69,23 @@ window.addEventListener("keydown", function (event) {
   }
 
   if (event.key === "Backspace") {
-    if (textbox.value === "delete:" || textbox.value === "empty:") {
-      resetNavigationAndTextbox();
-    } else if (textbox.value.match(/^\/\w+:[^ ]+ $/)) {
-      const navElements = Array.from(document.querySelectorAll(".nav-element:not(.hidden)"));
-      resetNavElementsStyle(navElements);
-      textbox.value = textbox.value.substring(0, textbox.value.lastIndexOf(":")) + " ";
-      setTimeout(() => { selectNav(0); }, 20);
-    } else if (textbox.value.match(/^\/\w+:$/)) {
-      textbox.value = textbox.value.substring(0, textbox.value.lastIndexOf(":")) + " ";
-      setTimeout(() => { selectNav(0); }, 20);
-    } else if (
-      textbox.value.match(/^\/\w+:([^ ]+)? $/) ||
-      textbox.value.match(/^\/\w+ $/)
-    ) {
-      resetNavigationAndTextbox();
+    if (document.activeElement === textbox) {
+        if (textbox.value === "delete:" || textbox.value === "empty:") {
+            resetNavigationAndTextbox();
+        } else if (textbox.value.match(/^\/\w+:[^ ]+ $/)) {
+            const navElements = Array.from(document.querySelectorAll(".nav-element:not(.hidden)"));
+            resetNavElementsStyle(navElements);
+            textbox.value = textbox.value.substring(0, textbox.value.lastIndexOf(":")) + " ";
+            setTimeout(() => { selectNav(0); }, 20);
+        } else if (textbox.value.match(/^\/\w+:$/)) {
+            textbox.value = textbox.value.substring(0, textbox.value.lastIndexOf(":")) + " ";
+            setTimeout(() => { selectNav(0); }, 20);
+        } else if (
+            textbox.value.match(/^\/\w+:([^ ]+)? $/) ||
+            textbox.value.match(/^\/\w+ $/)
+        ) {
+            resetNavigationAndTextbox();
+        }
     }
   }
 
