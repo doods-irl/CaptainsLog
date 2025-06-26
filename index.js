@@ -433,12 +433,9 @@ ipcMain.on("text-submitted", (event, formData) => {
 
     fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
       if (err) throw err;
+      serveLogs();
     });
   });
-
-  setTimeout(() => {
-    serveLogs();
-  }, 10);
 });
 
 ipcMain.on("modify-log-edit", (event, logDataArray) => {
@@ -533,12 +530,9 @@ ipcMain.on("modify-category-delete", (event, categoryName) => {
 
     fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
       if (err) throw err;
+      serveLogs();
     });
   });
-
-  setTimeout(() => {
-    serveLogs();
-  }, 10);
 });
 
 ipcMain.on("modify-category-empty", (event, categoryName) => {
@@ -557,12 +551,9 @@ ipcMain.on("modify-category-empty", (event, categoryName) => {
 
     fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
       if (err) throw err;
+      serveLogs();
     });
   });
-
-  setTimeout(() => {
-    serveLogs();
-  }, 10);
 });
 
 ipcMain.on("modify-category-move", (event, categoryName, position) => {
@@ -582,14 +573,12 @@ ipcMain.on("modify-category-move", (event, categoryName, position) => {
 
       fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
         if (err) throw err;
+        serveLogs();
       });
     } else {
+      serveLogs();
     }
   });
-
-  setTimeout(() => {
-    serveLogs();
-  }, 10);
 });
 
 app.on("will-quit", () => {
