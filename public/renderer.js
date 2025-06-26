@@ -329,6 +329,17 @@ function displayError(err, duration) {
   setTimeout(() => { errorMessage.style.display = "none"; }, duration);
 }
 
+function removeCategoryElements(categoryName) {
+  const categoryPattern = new RegExp(
+    `^category-(nav|logs)-${categoryName}(:|$)`
+  );
+  document.querySelectorAll("[id]").forEach((element) => {
+    if (categoryPattern.test(element.id)) {
+      element.remove();
+    }
+  });
+}
+
 function initialiseForm() {
   const textForm = document.getElementById("text-form");
   const errorMessage = document.getElementById("error-message");
@@ -483,17 +494,6 @@ function initialiseForm() {
     }
     setTimeout(() => { selectNav(0); }, 5);
   });
-
-  function removeCategoryElements(categoryName) {
-    const categoryPattern = new RegExp(
-      `^category-(nav|logs)-${categoryName}(:|$)`
-    );
-    document.querySelectorAll("[id]").forEach((element) => {
-      if (categoryPattern.test(element.id)) {
-        element.remove();
-      }
-    });
-  }
 
   textbox.addEventListener("input", function () {
     const inputValue = this.value.trim();
