@@ -253,7 +253,7 @@ ipcMain.on("commit-color-to-config", (event, colorId) => {
   config.color = colorId;
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
   accentColor = colorId;
-  win.webContents.executeJavaScript(`setTheme('${accentColor}', '${themeColor}')`);
+  win.webContents.send('apply-theme', { accentColor, themeColor });
 });
 
 ipcMain.on("commit-theme-to-config", (event, themeId) => {
@@ -261,7 +261,7 @@ ipcMain.on("commit-theme-to-config", (event, themeId) => {
   config.theme = themeId;
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
   themeColor = themeId;
-  win.webContents.executeJavaScript(`setTheme('${accentColor}', '${themeColor}')`);
+  win.webContents.send('apply-theme', { accentColor, themeColor });
 });
 
 ipcMain.on("open-file-dialog", async (event) => {
@@ -336,8 +336,17 @@ function serveLogs() {
       console.error("Error reading the file:", err);
       return;
     }
-    win.webContents.executeJavaScript(`setTheme('${accentColor}', '${themeColor}')`);
-    win.webContents.executeJavaScript(`renderLogs(${data})`);
+
+    let logs;
+    try {
+      logs = JSON.parse(data);
+    } catch (parseErr) {
+      logs = {};
+      console.error("Error parsing logs:", parseErr);
+    }
+
+    win.webContents.send('apply-theme', { accentColor, themeColor });
+    win.webContents.send('logs-data', logs);
   });
 }
 

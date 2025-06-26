@@ -10,4 +10,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     emptyCategory: (category) => ipcRenderer.send('modify-category-empty', category),
     moveCategory: (content, number) => ipcRenderer.send('modify-category-move', content, number),
     requestHide: () => ipcRenderer.send('request-hide'),
+    onApplyTheme: (callback) => ipcRenderer.on('apply-theme', (event, data) => callback(data.accentColor, data.themeColor)),
+    onLogsData: (callback) => ipcRenderer.on('logs-data', (event, logs) => callback(logs)),
 });

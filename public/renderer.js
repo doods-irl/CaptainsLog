@@ -18,6 +18,12 @@ let pomodoroCategory = null;
 document.addEventListener("DOMContentLoaded", () => {
   textbox = document.getElementById("textbox");
   window.electronAPI.refreshLogs();
+  window.electronAPI.onApplyTheme((accent, theme) => {
+    setTheme(accent, theme);
+  });
+  window.electronAPI.onLogsData((logs) => {
+    renderLogs(logs);
+  });
   initialiseForm();
   hideSubcategories();
 });
