@@ -439,7 +439,7 @@ function initialiseForm() {
           window.electronAPI.moveCategory(category, number);
           window.electronAPI.refreshLogs();
         } else {
-          console.log("No valid number found after '/m'");
+          displayError("No valid number found after '/m'.", 4000);
         }
       } else if (content.startsWith("pom:")) {
         if (!categoryExists) {
