@@ -1,0 +1,14 @@
+{
+  "categories": [
+    {
+      "name": "example",
+      "logs": [
+        {
+          "id": 1,
+          "content": "Hello World",
+          "status": "active"
+        }
+      ]
+    }
+  ]
+}
