@@ -856,10 +856,14 @@ function shouldSelectNextLog(logCategory, logId, currentStatus) {
   const currentIndex = logs.findIndex((log) => parseInt(log.getAttribute("data-log-id")) === logId);
 
   if (currentStatus === "active") {
-    return (currentIndex < logs.length - 1 || logs[currentIndex + 1].getAttribute("data-log-status") === "done"
+    return (
+      currentIndex < logs.length - 1 ||
+      logs[currentIndex + 1]?.getAttribute("data-log-status") === "done"
     );
   } else {
-    return ( currentIndex > 0 || logs[currentIndex - 1].getAttribute("data-log-status") === "active"
+    return (
+      currentIndex > 0 ||
+      logs[currentIndex - 1]?.getAttribute("data-log-status") === "active"
     );
   }
 }
