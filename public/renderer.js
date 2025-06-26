@@ -46,20 +46,19 @@ function setTheme(accentColor, themeColor) {
   document.documentElement.setAttribute("data-theme", themeColor);
 }
 
-window.addEventListener("keydown", function (event) {
-  keysPressed[event.key] = true;
+function resetNavigationAndTextbox() {
+  clearText();
+  setTimeout(() => { selectNav(0); }, 20);
+}
 
-  function resetNavigationAndTextbox() {
-    clearText();
-    setTimeout(() => { selectNav(0); }, 20);
-  }
+function handleTab(event) {
+  if (event.key !== "Tab") return;
+  event.preventDefault();
+  focusText();
+  selectNav(keysPressed["Shift"] ? -1 : 1);
+}
 
-  function handleTabNavigation() {
-    event.preventDefault();
-    focusText();
-    selectNav(keysPressed["Shift"] ? -1 : 1);
-  }
-
+function handleArrowKeys(event) {
   if (!currentSelectedLog) {
     if (event.key === "ArrowRight" && !keysPressed["Shift"]) {
       selectNav(1);
@@ -69,36 +68,50 @@ window.addEventListener("keydown", function (event) {
       resetNavigationAndTextbox();
     }
   }
+}
 
+function handleCommandShortcuts(event) {
   if (event.key === "Backspace") {
     if (document.activeElement === textbox) {
-        if (textbox.value === "delete:" || textbox.value === "empty:") {
-            resetNavigationAndTextbox();
-        } else if (textbox.value.match(/^\/\w+:[^ ]+ $/)) {
-            const navElements = Array.from(document.querySelectorAll(".nav-element:not(.hidden)"));
-            resetNavElementsStyle(navElements);
-            textbox.value = textbox.value.substring(0, textbox.value.lastIndexOf(":")) + " ";
-            setTimeout(() => { selectNav(0); }, 20);
-        } else if (textbox.value.match(/^\/\w+:$/)) {
-            textbox.value = textbox.value.substring(0, textbox.value.lastIndexOf(":")) + " ";
-            setTimeout(() => { selectNav(0); }, 20);
-        } else if (
-            textbox.value.match(/^\/\w+:([^ ]+)? $/) ||
-            textbox.value.match(/^\/\w+ $/)
-        ) {
-            resetNavigationAndTextbox();
-        }
+      if (textbox.value === "delete:" || textbox.value === "empty:") {
+        resetNavigationAndTextbox();
+      } else if (textbox.value.match(/^\/\w+:[^ ]+ $/)) {
+        const navElements = Array.from(document.querySelectorAll(".nav-element:not(.hidden)"));
+        resetNavElementsStyle(navElements);
+        textbox.value = textbox.value.substring(0, textbox.value.lastIndexOf(":")) + " ";
+        setTimeout(() => { selectNav(0); }, 20);
+      } else if (textbox.value.match(/^\/\w+:$/)) {
+        textbox.value = textbox.value.substring(0, textbox.value.lastIndexOf(":")) + " ";
+        setTimeout(() => { selectNav(0); }, 20);
+      } else if (
+        textbox.value.match(/^\/\w+:([^ ]+)? $/) ||
+        textbox.value.match(/^\/\w+ $/)
+      ) {
+        resetNavigationAndTextbox();
+      }
     }
-  }
-
-  if (event.key === "Tab") {
-    handleTabNavigation();
   }
 
   if (event.key === ":" && textbox.value.match(/^\/\w+ $/)) {
     textbox.value = textbox.value.replace(" ", "");
   }
 
+  if (event.key === " ") {
+    const categoryRegex = /^\/(\w+)(?::(\w+))?$/;
+    const match = categoryRegex.exec(textbox.value);
+
+    if (match) {
+      let potentialCategory = match[1] + (match[2] ? ":" + match[2] : "");
+
+      if (Array.isArray(categories) && categories.some(category => category === potentialCategory)) {
+        event.preventDefault();
+        selectNav(0);
+      }
+    }
+  }
+}
+
+function handleLogSelection(event) {
   if (window.innerHeight > 200) {
     if (event.key === "ArrowDown" && !keysPressed["Shift"]) {
       selectLog(true);
@@ -122,20 +135,15 @@ window.addEventListener("keydown", function (event) {
       deleteLog();
     }
   }
+}
 
-  if (event.key === " ") {
-    const categoryRegex = /^\/(\w+)(?::(\w+))?$/;
-    const match = categoryRegex.exec(textbox.value);
-  
-    if (match) {
-      let potentialCategory = match[1] + (match[2] ? ":" + match[2] : "");
-      
-      if (Array.isArray(categories) && categories.some(category => category === potentialCategory)) {
-        event.preventDefault();
-        selectNav(0);
-      }
-    }
-  }
+window.addEventListener("keydown", function (event) {
+  keysPressed[event.key] = true;
+
+  handleArrowKeys(event);
+  handleTab(event);
+  handleCommandShortcuts(event);
+  handleLogSelection(event);
 });
 
 window.addEventListener("keyup", (event) => {
