@@ -96,14 +96,18 @@ app.on("ready", () => {
   }
 });
 
+function getRightEdgeX() {
+  const workWidth = screen.getPrimaryDisplay().workAreaSize.width;
+  return Math.max(0, workWidth - 800 - 20);
+}
+
 function createWindow() {
-  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   getAccentColor();
 
   win = new BrowserWindow({
     width: 800,
     height: 90,
-    x: width - 820,
+    x: getRightEdgeX(),
     y: 20,
     frame: false,
     resizable: false,
@@ -311,6 +315,7 @@ function registerShortcuts() {
 function showMiniEditor() {
   serveLogs();
   win.webContents.executeJavaScript("clearText()");
+  win.setPosition(getRightEdgeX(), 20);
   win.show();
   win.setSize(800, miniHeight);
   win.webContents.executeJavaScript("focusText()");
@@ -319,6 +324,7 @@ function showMiniEditor() {
 function showBigEditor() {
   serveLogs();
   win.webContents.executeJavaScript("clearText()");
+  win.setPosition(getRightEdgeX(), 20);
   win.show();
   win.setSize(800, bigHeight);
   win.webContents.executeJavaScript("focusText()");
