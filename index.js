@@ -347,6 +347,20 @@ function serveLogs() {
   });
 }
 
+function updateLogs(modifierFn, callback) {
+  fs.readFile(filePath, (err, data) => {
+    if (err) throw err;
+
+    let json = JSON.parse(data);
+    modifierFn(json);
+
+    fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
+      if (err) throw err;
+      if (callback) callback();
+    });
+  });
+}
+
 ipcMain.on("refresh-logs", (event) => {
   serveLogs();
 });
@@ -445,11 +459,7 @@ ipcMain.on("text-submitted", (event, formData) => {
 });
 
 ipcMain.on("modify-log-edit", (event, logDataArray) => {
-  fs.readFile(filePath, (err, data) => {
-    if (err) throw err;
-
-    let json = JSON.parse(data);
-
+  updateLogs((json) => {
     logDataArray.forEach((logData) => {
       let categoryObj = json.categories.find(
         (cat) => cat.name === logData.category
@@ -463,19 +473,11 @@ ipcMain.on("modify-log-edit", (event, logDataArray) => {
         }
       }
     });
-
-    fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
-      if (err) throw err;
-    });
-  });
+  }, serveLogs);
 });
 
 ipcMain.on("modify-log-delete", (event, logDataArray) => {
-  fs.readFile(filePath, (err, data) => {
-    if (err) throw err;
-
-    let json = JSON.parse(data);
-
+  updateLogs((json) => {
     logDataArray.forEach((logData) => {
       let categoryObj = json.categories.find(
         (cat) => cat.name === logData.logCategory
@@ -489,19 +491,11 @@ ipcMain.on("modify-log-delete", (event, logDataArray) => {
         }
       }
     });
-
-    fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
-      if (err) throw err;
-    });
-  });
+  }, serveLogs);
 });
 
 ipcMain.on("modify-log-done", (event, logDataArray) => {
-  fs.readFile(filePath, (err, data) => {
-    if (err) throw err;
-
-    let json = JSON.parse(data);
-
+  updateLogs((json) => {
     logDataArray.forEach((logData) => {
       let categoryObj = json.categories.find(
         (cat) => cat.name === logData.logCategory
@@ -515,38 +509,21 @@ ipcMain.on("modify-log-done", (event, logDataArray) => {
         }
       }
     });
-
-    fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
-      if (err) throw err;
-    });
-  });
+  }, serveLogs);
 });
 
 ipcMain.on("modify-category-delete", (event, categoryName) => {
-  fs.readFile(filePath, (err, data) => {
-    if (err) throw err;
-
-    let json = JSON.parse(data);
-
+  updateLogs((json) => {
     json.categories.forEach(cat => {
       if (cat.name === categoryName || cat.name.startsWith(categoryName + ':')) {
         cat.status = "deleted";
       }
     });
-
-    fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
-      if (err) throw err;
-      serveLogs();
-    });
-  });
+  }, serveLogs);
 });
 
 ipcMain.on("modify-category-empty", (event, categoryName) => {
-  fs.readFile(filePath, (err, data) => {
-    if (err) throw err;
-
-    let json = JSON.parse(data);
-
+  updateLogs((json) => {
     let categoryObj = json.categories.find((cat) => cat.name === categoryName);
 
     if (categoryObj) {
@@ -554,20 +531,11 @@ ipcMain.on("modify-category-empty", (event, categoryName) => {
         log.status = "deleted";
       });
     }
-
-    fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
-      if (err) throw err;
-      serveLogs();
-    });
-  });
+  }, serveLogs);
 });
 
 ipcMain.on("modify-category-move", (event, categoryName, position) => {
-  fs.readFile(filePath, (err, data) => {
-    if (err) throw err;
-
-    let json = JSON.parse(data);
-
+  updateLogs((json) => {
     const categoryIndex = json.categories.findIndex(
       (cat) => cat.name === categoryName
     );
@@ -576,15 +544,8 @@ ipcMain.on("modify-category-move", (event, categoryName, position) => {
       const [categoryObj] = json.categories.splice(categoryIndex, 1);
       position = Math.max(0, Math.min(position, json.categories.length));
       json.categories.splice(position, 0, categoryObj);
-
-      fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
-        if (err) throw err;
-        serveLogs();
-      });
-    } else {
-      serveLogs();
     }
-  });
+  }, serveLogs);
 });
 
 app.on("will-quit", () => {
