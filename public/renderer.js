@@ -14,6 +14,8 @@ let pomodoroTimerId = null;
 let timeLeftInSeconds = 0;
 let isTimerPaused = false;
 let pomodoroCategory = null;
+let content;
+let subcategories;
 
 document.addEventListener("DOMContentLoaded", () => {
   textbox = document.getElementById("textbox");
