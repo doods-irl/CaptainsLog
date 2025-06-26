@@ -604,11 +604,10 @@ function filterCategories(partialCategory) {
 }
 
 function showAllCategories() {
-  const navElements = document.getElementsByClassName(
-    "nav-element:not(.hidden)"
-  );
-
-  Array.from(navElements).forEach((nav) => { nav.classList.remove("hidden"); });
+  const navElements = document.querySelectorAll('.nav-element.hidden');
+  navElements.forEach((nav) => {
+    nav.classList.remove('hidden');
+  });
   selectNav(-currentCategory);
 }
 
