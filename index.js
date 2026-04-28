@@ -1,6 +1,7 @@
 const {
   app,
   BrowserWindow,
+  clipboard,
   globalShortcut,
   ipcMain,
   screen,
@@ -11,30 +12,43 @@ const {
 } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const fsp = require("fs/promises");
+const { JsonStore } = require("./store");
+const { discoverPlugins } = require("./plugin-loader");
 
 let setupWin;
 let tutorialWin;
 let settingsWin;
 let win;
-let miniHeight = 90;
-let bigHeight = 800;
-let configPath;
-let filePath;
-let tray = null;
-let accentColor;
-let themeColor;
+let tray;
+let logStore;
+let pluginStateStore;
+let plugins = [];
+let activePluginId = null;
+let editorMode = "mini";
+
+const WINDOW_WIDTH = 800;
+const MINI_HEIGHT = 90;
+const MIN_BIG_HEIGHT = 520;
+const DEFAULT_THEME = { color: "tomato", theme: "light" };
+const DEFAULT_PLUGIN_STATE = { plugins: {} };
 const editorShortcut = "CommandOrControl+Alt+L";
 const bigEditorShortcut = "CommandOrControl+Alt+K";
 const escapeShortcut = "Escape";
 const singleInstanceLock = app.requestSingleInstanceLock();
 const appFolder = path.dirname(process.execPath);
-const exeName = path.resolve(appFolder, '..', `Captain's Log.exe`);
+const exeName = path.resolve(appFolder, "..", "Captain's Log.exe");
+
+let configPath;
+let filePath;
+let accentColor = DEFAULT_THEME.color;
+let themeColor = DEFAULT_THEME.theme;
 
 if (!singleInstanceLock) {
   app.quit();
 }
 
-app.on("second-instance", (event, commandLine, workingDirectory) => {
+app.on("second-instance", () => {
   setTimeout(() => {
     showBigEditor();
   }, 100);
@@ -42,106 +56,104 @@ app.on("second-instance", (event, commandLine, workingDirectory) => {
 
 app.setLoginItemSettings({
   openAtLogin: true,
-  args: [
-    '--processStart', `"${exeName}"`,
-    '--process-start-args', '"--hidden"'
-  ]
-})
+  args: ["--processStart", `"${exeName}"`, "--process-start-args", '"--hidden"'],
+});
 
-app.on("ready", () => {
+app.whenReady().then(async () => {
   tray = new Tray(path.join(__dirname, "favicon.ico"));
+  tray.setToolTip("Captain's Log");
+  tray.setContextMenu(buildTrayMenu());
+  tray.on("click", () => showBigEditor());
 
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: "Mini Editor",
-      click: () => {
-        showMiniEditor();
-      },
-    },
-    {
-      label: "Big Editor",
-      click: () => {
-        showBigEditor();
-      },
-    },
-    {
-      label: "Tutorial",
-      click: () => {
-        createTutorialWindow();
-      },
-    },
-    {
-      label: "Settings",
-      click: () => {
-        createSettingsWindow();
-      },
-    },
-    {
-      label: "Close",
-      click: () => {
-        app.quit();
-      },
-    },
-  ]);
+  plugins = (await discoverPlugins(__dirname)).filter((plugin) => plugin.id !== "notes");
+  activePluginId = null;
 
-  tray.setToolTip(`Captain's Log`);
-  tray.setContextMenu(contextMenu);
+  const userDataPath = app.getPath("userData");
+  pluginStateStore = new JsonStore(path.join(userDataPath, "plugin-state.json"), DEFAULT_PLUGIN_STATE);
 
-  let setupComplete = checkSetupComplete();
+  const setupComplete = loadConfigFromDisk();
 
   if (setupComplete) {
-    createWindow();
+    logStore = new JsonStore(filePath);
+    await createWindow();
   } else {
     createSetupWindow();
   }
 });
 
-function getRightEdgeX() {
-  const workWidth = screen.getPrimaryDisplay().workAreaSize.width;
-  return Math.max(0, workWidth - 800 - 20);
+function buildTrayMenu() {
+  return Menu.buildFromTemplate([
+    { label: "Mini Editor", click: () => showMiniEditor() },
+    { label: "Big Editor", click: () => showBigEditor() },
+    { label: "Tutorial", click: () => createTutorialWindow() },
+    { label: "Settings", click: () => createSettingsWindow() },
+    { label: "Close", click: () => app.quit() },
+  ]);
 }
 
-function createWindow() {
-  getAccentColor();
+function getPrimaryWorkArea() {
+  return screen.getPrimaryDisplay().workArea;
+}
 
+function getEditorBounds(height) {
+  const workArea = getPrimaryWorkArea();
+  const width = Math.min(WINDOW_WIDTH, workArea.width);
+  return {
+    width,
+    height: Math.min(height, workArea.height),
+    x: Math.max(workArea.x, workArea.x + workArea.width - width - 20),
+    y: workArea.y + 20,
+  };
+}
+
+function getBigEditorHeight() {
+  const workArea = getPrimaryWorkArea();
+  return Math.max(MIN_BIG_HEIGHT, Math.min(workArea.height - 40, 900));
+}
+
+async function createWindow() {
   win = new BrowserWindow({
-    width: 800,
-    height: 90,
-    x: getRightEdgeX(),
-    y: 20,
+    ...getEditorBounds(MINI_HEIGHT),
     frame: false,
-    resizable: false,
+    resizable: true,
+    minWidth: 420,
+    minHeight: MINI_HEIGHT,
     show: false,
+    skipTaskbar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      devTools: true,
+      devTools: !app.isPackaged,
     },
-    skipTaskbar: true,
   });
 
-  win.loadFile("public/index.html");
-  registerShortcuts();
-  checkJSON();
-
   win.on("show", () => {
-    serveLogs();
     globalShortcut.register(escapeShortcut, () => {
-      win.blur();
+      if (win && !win.isDestroyed()) {
+        win.blur();
+      }
     });
   });
 
   win.on("blur", () => {
-    win.webContents.executeJavaScript("clearText()");
-    win.webContents.executeJavaScript("showAllCategories()");
+    if (!win || win.isDestroyed()) {
+      return;
+    }
+
+    sendEditorCommand({ type: "reset-input" });
     globalShortcut.unregister(escapeShortcut);
     win.hide();
-    win.setResizable(true);
-    win.setSize(800, 70);
-    win.setResizable(false);
+    editorMode = "mini";
+    win.setBounds(getEditorBounds(MINI_HEIGHT));
   });
 
-  tray.on("click", () => showBigEditor());
+  win.webContents.on("did-finish-load", () => {
+    pushShellState();
+  });
+
+  await win.loadFile("public/index.html");
+  registerShortcuts();
+  pushShellState();
 }
 
 function createSetupWindow() {
@@ -154,398 +166,519 @@ function createSetupWindow() {
     webPreferences: {
       preload: path.join(__dirname, "setupPreload.js"),
       contextIsolation: true,
-      devTools: false,
+      devTools: !app.isPackaged,
     },
   });
+
   setupWin.loadFile("public/setup.html");
 }
 
 function createTutorialWindow() {
+  if (tutorialWin && !tutorialWin.isDestroyed()) {
+    tutorialWin.focus();
+    return;
+  }
+
   tutorialWin = new BrowserWindow({
     width: 800,
     height: 1000,
     frame: false,
-    resizable: false,
+    resizable: true,
+    minWidth: 560,
+    minHeight: 500,
     icon: "favicon.ico",
     webPreferences: {
       preload: path.join(__dirname, "tutorialPreload.js"),
       contextIsolation: true,
-      devTools: false,
+      devTools: !app.isPackaged,
     },
   });
+
+  tutorialWin.on("closed", () => {
+    tutorialWin = null;
+  });
+
   tutorialWin.loadFile("public/tutorial.html");
-  tutorialWin.show();
 }
 
-ipcMain.on("close-tutorial-window", (event) => {
-  tutorialWin.close();
-});
-
 function createSettingsWindow() {
-  const escapedConfigPath = configPath.replace(/\\/g, "\\\\");
-  const escapedFilePath = filePath.replace(/\\/g, "\\\\");
+  if (settingsWin && !settingsWin.isDestroyed()) {
+    settingsWin.focus();
+    pushSettingsData();
+    return;
+  }
 
   settingsWin = new BrowserWindow({
     width: 800,
-    height: 456,
+    height: 520,
     frame: false,
-    resizable: false,
+    resizable: true,
+    minWidth: 620,
+    minHeight: 420,
     icon: "favicon.ico",
     webPreferences: {
       preload: path.join(__dirname, "settingsPreload.js"),
       contextIsolation: true,
-      devTools: false,
+      devTools: !app.isPackaged,
     },
   });
+
+  settingsWin.on("closed", () => {
+    settingsWin = null;
+  });
+
+  settingsWin.webContents.on("did-finish-load", () => {
+    pushSettingsData();
+  });
+
   settingsWin.loadFile("public/settings.html");
-  settingsWin.show();
-  settingsWin.webContents.executeJavaScript(
-    `enumerateData("${escapedConfigPath}", "${escapedFilePath}")`
-  );
 }
 
-ipcMain.on("open-explorer", (event, path) => {
-  shell.openPath(path).then((err) => {
-    if (err) {
-      console.error("Error opening path:", err);
-    }
-  });
-});
-
-ipcMain.on("close-settings-window", (event) => {
-  settingsWin.close();
-});
-
-function checkSetupComplete() {
+function loadConfigFromDisk() {
   const userDataPath = app.getPath("userData");
   configPath = path.join(userDataPath, "config.json");
 
-  if (fs.existsSync(configPath)) {
-    try {
-      const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-      filePath = config.filePath;
-      return true;
-    } catch (error) {
-      console.error("Error reading config file:", error);
-      return false;
-    }
+  if (!fs.existsSync(configPath)) {
+    return false;
   }
-  return false;
+
+  try {
+    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    filePath = config.filePath;
+    accentColor = config.color || DEFAULT_THEME.color;
+    themeColor = config.theme || DEFAULT_THEME.theme;
+    return Boolean(filePath);
+  } catch (error) {
+    console.error("Error reading config file:", error);
+    accentColor = DEFAULT_THEME.color;
+    themeColor = DEFAULT_THEME.theme;
+    return false;
+  }
 }
 
-function getAccentColor() {
-  fs.readFile(configPath, "utf8", (err, data) => {
-    if (err) {
-      console.error("Error reading the file:", err);
-      return;
-    }
+async function writeConfig(updates) {
+  const nextConfig = {
+    filePath,
+    color: accentColor,
+    theme: themeColor,
+    ...updates,
+  };
 
-    try {
-      const config = JSON.parse(data);
-      accentColor = config.color;
-      themeColor = config.theme;
-    } catch (parseErr) {
-      accentColor = "tomato";
-      themeColor = "light";
-      console.error("Error parsing JSON:", parseErr);
-    }
+  filePath = nextConfig.filePath;
+  accentColor = nextConfig.color;
+  themeColor = nextConfig.theme;
+
+  await fsp.writeFile(configPath, JSON.stringify(nextConfig, null, 2), "utf8");
+}
+
+async function buildShellState(notesOverride = null) {
+  const notes = notesOverride || (logStore ? await logStore.get() : { categories: [] });
+
+  return {
+    hostApiVersion: 1,
+    activePluginId,
+    editorMode,
+    plugins,
+    theme: {
+      accentColor,
+      themeColor,
+    },
+    notes,
+  };
+}
+
+async function pushShellState(target = win, notesOverride = null) {
+  if (!target || target.isDestroyed()) {
+    return;
+  }
+
+  try {
+    const shellState = await buildShellState(notesOverride);
+    target.webContents.send("shell-state", shellState);
+  } catch (error) {
+    console.error("Failed to send shell state:", error);
+  }
+}
+
+function pushSettingsData() {
+  if (!settingsWin || settingsWin.isDestroyed()) {
+    return;
+  }
+
+  settingsWin.webContents.send("settings-data", {
+    configPath,
+    filePath,
+    accentColor,
+    themeColor,
   });
 }
 
-ipcMain.on("commit-color-to-config", (event, colorId) => {
-  const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-  config.color = colorId;
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  accentColor = colorId;
-  win.webContents.executeJavaScript(`setTheme('${accentColor}', '${themeColor}')`);
-});
-
-ipcMain.on("commit-theme-to-config", (event, themeId) => {
-  const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-  config.theme = themeId;
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  themeColor = themeId;
-  win.webContents.executeJavaScript(`setTheme('${accentColor}', '${themeColor}')`);
-});
-
-ipcMain.on("open-file-dialog", async (event) => {
-  const { filePaths } = await dialog.showOpenDialog({
-    properties: ["openDirectory"],
-  });
-  if (filePaths && filePaths.length > 0) {
-    event.sender.send("selected-directory", filePaths[0]);
+function sendEditorCommand(payload) {
+  if (!win || win.isDestroyed()) {
+    return;
   }
-});
 
-ipcMain.on("receive-setup-path", (event, receivedPath) => {
-  filePath = path.join(receivedPath, "captainsLogs.json");
-  const configData = { filePath: filePath, color: "tomato", theme: "light" };
-  fs.writeFile(configPath, JSON.stringify(configData), (err) => {
-    if (err) {
-      console.error("Error writing config file:", err);
-      return;
-    }
-
-    if (setupWin) {
-      setupWin.close();
-      createWindow();
-      createTutorialWindow();
-    }
-  });
-});
+  win.webContents.send("editor-command", payload);
+}
 
 function registerShortcuts() {
+  globalShortcut.unregister(editorShortcut);
+  globalShortcut.unregister(bigEditorShortcut);
+
   globalShortcut.register(editorShortcut, () => {
     if (!win.isVisible()) {
       showMiniEditor();
-    } else if (win.isVisible()) {
-      win.setSize(800, bigHeight);
+      return;
     }
+
+    editorMode = "big";
+    win.setBounds(getEditorBounds(getBigEditorHeight()));
+    pushShellState();
   });
 
   globalShortcut.register(bigEditorShortcut, () => {
-    if (!win.isVisible()) {
-      showBigEditor();
-    } else {
-      win.setSize(800, bigHeight);
-    }
+    showBigEditor();
   });
 }
 
-function showMiniEditor() {
-  serveLogs();
-  win.webContents.executeJavaScript("clearText()");
-  win.setPosition(getRightEdgeX(), 20);
+async function showMiniEditor() {
+  if (!win || win.isDestroyed()) {
+    return;
+  }
+
+  editorMode = "mini";
+  await pushShellState();
+  win.setBounds(getEditorBounds(MINI_HEIGHT));
   win.show();
-  win.setSize(800, miniHeight);
-  win.webContents.executeJavaScript("focusText()");
+  sendEditorCommand({ type: "prepare-show", mode: "mini" });
 }
 
-function showBigEditor() {
-  serveLogs();
-  win.webContents.executeJavaScript("clearText()");
-  win.setPosition(getRightEdgeX(), 20);
+async function showBigEditor() {
+  if (!win || win.isDestroyed()) {
+    return;
+  }
+
+  editorMode = "big";
+  await pushShellState();
+  win.setBounds(getEditorBounds(getBigEditorHeight()));
   win.show();
-  win.setSize(800, bigHeight);
-  win.webContents.executeJavaScript("focusText()");
+  sendEditorCommand({ type: "prepare-show", mode: "big" });
 }
 
-function checkJSON() {
-  if (!fs.existsSync(filePath)) {
-    fs.writeFileSync(filePath, "{}");
-  }
-}
+function parseEntry(formData) {
+  let category = "notes";
+  let subCategory = null;
+  let content = formData;
 
-function serveLogs() {
-  fs.readFile(filePath, "utf8", (err, data) => {
-    if (err) {
-      console.error("Error reading the file:", err);
-      return;
+  if (formData.startsWith("/")) {
+    const splitData = formData.split(" ");
+    const fullPath = splitData[0].substring(1);
+    const pathParts = fullPath.split(":");
+
+    category = pathParts[0].toLowerCase();
+
+    if (pathParts.length > 1) {
+      subCategory = `${category}:${pathParts[1].toLowerCase()}`;
     }
-    win.webContents.executeJavaScript(`setTheme('${accentColor}', '${themeColor}')`);
-    win.webContents.executeJavaScript(`renderLogs(${data})`);
+
+    content = splitData.slice(1).join(" ");
+  }
+
+  return { category, subCategory, content };
+}
+
+function ensureCategory(json, categoryName) {
+  let categoryObj = json.categories.find((cat) => cat.name === categoryName);
+
+  if (!categoryObj) {
+    categoryObj = {
+      name: categoryName,
+      status: "active",
+      logs: [],
+    };
+    json.categories.push(categoryObj);
+  } else if (categoryObj.status === "deleted") {
+    categoryObj.status = "active";
+  }
+
+  return categoryObj;
+}
+
+function restoreSubcategories(json, categoryName) {
+  json.categories.forEach((cat) => {
+    if (cat.name.startsWith(`${categoryName}:`) && cat.status === "deleted") {
+      cat.status = "active";
+    }
   });
 }
 
-function updateLogs(modifierFn, callback) {
-  fs.readFile(filePath, (err, data) => {
-    if (err) throw err;
+async function addEntry(formData) {
+  return logStore.update(async (json) => {
+    const { category, subCategory, content } = parseEntry(formData);
 
-    let json = JSON.parse(data);
-    modifierFn(json);
-
-    fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
-      if (err) throw err;
-      if (callback) callback();
-    });
-  });
-}
-
-ipcMain.on("refresh-logs", (event) => {
-  serveLogs();
-});
-
-ipcMain.on("request-hide", (event) => {
-  let size = win.getSize();
-  if (size[1] < 200) {
-    win.blur();
-  }
-});
-
-ipcMain.on("text-submitted", (event, formData) => {
-  let size = win.getSize();
-  if (size[1] < 200) {
-    win.blur();
-  }
-
-  fs.readFile(filePath, (err, data) => {
-    if (err && err.code === "ENOENT") {
-      var json = { categories: [] };
-    } else if (err) {
-      throw err;
-    } else {
-      var json = JSON.parse(data);
-    }
-
-    if (!json.categories) {
-      json.categories = [];
-    }
-
-    let category = "notes";
-    let subCategory = null;
-    let content = formData;
-    if (formData.startsWith("/")) {
-      const splitData = formData.split(" ");
-      const fullPath = splitData[0].substring(1);
-      const pathParts = fullPath.split(':');
-
-      category = pathParts[0].toLowerCase();
-      if (pathParts.length > 1) {
-        subCategory = `${category}:${pathParts[1].toLowerCase()}`;
-      }
-      content = splitData.slice(1).join(" ");
-    }
-
-    let categoryObj = json.categories.find(cat => cat.name === category);
-    if (!categoryObj) {
-      categoryObj = {
-        name: category,
-        status: "active",
-        logs: [],
-      };
-      json.categories.push(categoryObj);
-    } else {
-      if (categoryObj.status === "deleted") {
-        categoryObj.status = "active";
-        json.categories.forEach(cat => {
-          if (cat.name.startsWith(category + ':') && cat.status === "deleted") {
-            cat.status = "active";
-          }
-        });
-      }
-    }
+    let categoryObj = ensureCategory(json, category);
+    restoreSubcategories(json, category);
 
     if (subCategory) {
-      let subCategoryObj = json.categories.find(cat => cat.name === subCategory);
-      if (!subCategoryObj) {
-        subCategoryObj = {
-          name: subCategory,
-          status: "active",
-          logs: [],
-        };
-        json.categories.push(subCategoryObj);
-      } else {
-        if (subCategoryObj.status === "deleted") {
-          subCategoryObj.status = "active";
-        }
-      }
-      categoryObj = subCategoryObj;
+      categoryObj = ensureCategory(json, subCategory);
     }
 
-    if (content != "") {
-      const newLog = {
-        id: categoryObj.logs.length + 1,
-        content: content,
+    if (content !== "") {
+      categoryObj.logs.push({
+        id: categoryObj.logs.reduce((maxId, log) => Math.max(maxId, log.id || 0), 0) + 1,
+        content,
         status: "active",
-      };
-      categoryObj.logs.push(newLog);
+      });
     }
+  });
+}
 
-    fs.writeFile(filePath, JSON.stringify(json, null, 2), (err) => {
-      if (err) throw err;
-      serveLogs();
+async function editLogs(logDataArray) {
+  return logStore.update(async (json) => {
+    logDataArray.forEach((logData) => {
+      const categoryObj = json.categories.find((cat) => cat.name === logData.category);
+      const logObj = categoryObj?.logs.find((log) => log.id.toString() === logData.id);
+
+      if (logObj) {
+        logObj.content = logData.content;
+      }
     });
   });
-});
+}
 
-ipcMain.on("modify-log-edit", (event, logDataArray) => {
-  updateLogs((json) => {
+async function deleteLogs(logDataArray) {
+  return logStore.update(async (json) => {
     logDataArray.forEach((logData) => {
-      let categoryObj = json.categories.find(
-        (cat) => cat.name === logData.category
-      );
-      if (categoryObj) {
-        let logObj = categoryObj.logs.find(
-          (log) => log.id.toString() === logData.id
-        );
-        if (logObj) {
-          logObj.content = logData.content;
-        }
+      const categoryObj = json.categories.find((cat) => cat.name === logData.logCategory);
+      const logObj = categoryObj?.logs.find((log) => log.id.toString() === logData.logId);
+
+      if (logObj) {
+        logObj.status = "deleted";
       }
     });
-  }, serveLogs);
-});
+  });
+}
 
-ipcMain.on("modify-log-delete", (event, logDataArray) => {
-  updateLogs((json) => {
+async function toggleDone(logDataArray) {
+  return logStore.update(async (json) => {
     logDataArray.forEach((logData) => {
-      let categoryObj = json.categories.find(
-        (cat) => cat.name === logData.logCategory
-      );
-      if (categoryObj) {
-        let logObj = categoryObj.logs.find(
-          (log) => log.id.toString() === logData.logId
-        );
-        if (logObj) {
-          logObj.status = "deleted";
-        }
+      const categoryObj = json.categories.find((cat) => cat.name === logData.logCategory);
+      const logObj = categoryObj?.logs.find((log) => log.id === parseInt(logData.logId, 10));
+
+      if (logObj) {
+        logObj.status = logObj.status === "active" ? "done" : "active";
       }
     });
-  }, serveLogs);
-});
+  });
+}
 
-ipcMain.on("modify-log-done", (event, logDataArray) => {
-  updateLogs((json) => {
-    logDataArray.forEach((logData) => {
-      let categoryObj = json.categories.find(
-        (cat) => cat.name === logData.logCategory
-      );
-      if (categoryObj) {
-        let logIdInt = parseInt(logData.logId);
-
-        let logObj = categoryObj.logs.find((log) => log.id === logIdInt);
-        if (logObj) {
-          logObj.status = logObj.status === "active" ? "done" : "active";
-        }
-      }
-    });
-  }, serveLogs);
-});
-
-ipcMain.on("modify-category-delete", (event, categoryName) => {
-  updateLogs((json) => {
-    json.categories.forEach(cat => {
-      if (cat.name === categoryName || cat.name.startsWith(categoryName + ':')) {
+async function deleteCategory(categoryName) {
+  return logStore.update(async (json) => {
+    json.categories.forEach((cat) => {
+      if (cat.name === categoryName || cat.name.startsWith(`${categoryName}:`)) {
         cat.status = "deleted";
       }
     });
-  }, serveLogs);
-});
+  });
+}
 
-ipcMain.on("modify-category-empty", (event, categoryName) => {
-  updateLogs((json) => {
-    let categoryObj = json.categories.find((cat) => cat.name === categoryName);
+async function emptyCategory(categoryName) {
+  return logStore.update(async (json) => {
+    const categoryObj = json.categories.find((cat) => cat.name === categoryName);
 
     if (categoryObj) {
       categoryObj.logs.forEach((log) => {
         log.status = "deleted";
       });
     }
-  }, serveLogs);
+  });
+}
+
+async function moveCategory(categoryName, position) {
+  return logStore.update(async (json) => {
+    const categoryIndex = json.categories.findIndex((cat) => cat.name === categoryName);
+
+    if (categoryIndex === -1) {
+      return;
+    }
+
+    const [categoryObj] = json.categories.splice(categoryIndex, 1);
+    const nextPosition = Math.max(0, Math.min(position, json.categories.length));
+    json.categories.splice(nextPosition, 0, categoryObj);
+  });
+}
+
+async function getPluginData(pluginId) {
+  const pluginState = await pluginStateStore.get();
+  return pluginState.plugins[pluginId] || {};
+}
+
+async function setPluginData(pluginId, value) {
+  const updatedState = await pluginStateStore.update(async (json) => {
+    json.plugins[pluginId] = value;
+  });
+
+  return updatedState.plugins[pluginId] || {};
+}
+
+async function dispatchHostCall(method, params = {}) {
+  switch (method) {
+    case "shell:set-active-plugin": {
+      if (plugins.some((plugin) => plugin.id === params.pluginId)) {
+        activePluginId = params.pluginId;
+        pushShellState();
+      }
+      return { activePluginId };
+    }
+    case "shell:list-plugins":
+      return plugins;
+    case "shell:activate-plugin": {
+      if (!plugins.some((plugin) => plugin.id === params.pluginId)) {
+        throw new Error(`Unknown plugin: ${params.pluginId}`);
+      }
+      activePluginId = params.pluginId;
+      pushShellState();
+      return { activePluginId };
+    }
+    case "shell:activate-notes":
+      activePluginId = "notes";
+      pushShellState();
+      return { activePluginId };
+    case "shell:get-state":
+      return buildShellState();
+    case "shell:reset-input":
+      sendEditorCommand({ type: "reset-input" });
+      return { ok: true };
+    case "shell:request-hide":
+      if (win && !win.isDestroyed()) {
+        win.blur();
+      }
+      return { ok: true };
+    case "notes:add-entry": {
+      const updatedNotes = await addEntry(params.formData);
+      pushShellState(win, updatedNotes);
+      return updatedNotes;
+    }
+    case "notes:edit-logs": {
+      const updatedNotes = await editLogs(params.logDataArray || []);
+      pushShellState(win, updatedNotes);
+      return updatedNotes;
+    }
+    case "notes:delete-logs": {
+      const updatedNotes = await deleteLogs(params.logDataArray || []);
+      pushShellState(win, updatedNotes);
+      return updatedNotes;
+    }
+    case "notes:toggle-done": {
+      const updatedNotes = await toggleDone(params.logDataArray || []);
+      pushShellState(win, updatedNotes);
+      return updatedNotes;
+    }
+    case "notes:delete-category": {
+      const updatedNotes = await deleteCategory(params.categoryName);
+      pushShellState(win, updatedNotes);
+      return updatedNotes;
+    }
+    case "notes:empty-category": {
+      const updatedNotes = await emptyCategory(params.categoryName);
+      pushShellState(win, updatedNotes);
+      return updatedNotes;
+    }
+    case "notes:move-category": {
+      const updatedNotes = await moveCategory(params.categoryName, params.position);
+      pushShellState(win, updatedNotes);
+      return updatedNotes;
+    }
+    case "plugin:get-data":
+      return getPluginData(params.pluginId);
+    case "plugin:set-data":
+      return setPluginData(params.pluginId, params.data);
+    case "clipboard:write-text":
+      clipboard.writeText(params.text || "");
+      return { ok: true };
+    default:
+      throw new Error(`Unknown host method: ${method}`);
+  }
+}
+
+ipcMain.on("open-explorer", (_event, targetPath) => {
+  shell.openPath(targetPath).then((err) => {
+    if (err) {
+      console.error("Error opening path:", err);
+    }
+  });
 });
 
-ipcMain.on("modify-category-move", (event, categoryName, position) => {
-  updateLogs((json) => {
-    const categoryIndex = json.categories.findIndex(
-      (cat) => cat.name === categoryName
-    );
+ipcMain.on("close-tutorial-window", () => {
+  if (tutorialWin && !tutorialWin.isDestroyed()) {
+    tutorialWin.close();
+  }
+});
 
-    if (categoryIndex !== -1) {
-      const [categoryObj] = json.categories.splice(categoryIndex, 1);
-      position = Math.max(0, Math.min(position, json.categories.length));
-      json.categories.splice(position, 0, categoryObj);
-    }
-  }, serveLogs);
+ipcMain.on("close-settings-window", () => {
+  if (settingsWin && !settingsWin.isDestroyed()) {
+    settingsWin.close();
+  }
+});
+
+ipcMain.on("request-shell-state", () => {
+  pushShellState();
+});
+
+ipcMain.handle("shell:invoke", async (_event, payload) => {
+  return dispatchHostCall(payload.method, payload.params);
+});
+
+ipcMain.on("request-settings-data", () => {
+  pushSettingsData();
+});
+
+ipcMain.on("commit-color-to-config", async (_event, colorId) => {
+  await writeConfig({ color: colorId });
+  pushShellState();
+  pushSettingsData();
+});
+
+ipcMain.on("commit-theme-to-config", async (_event, themeId) => {
+  await writeConfig({ theme: themeId });
+  pushShellState();
+  pushSettingsData();
+});
+
+ipcMain.on("open-file-dialog", async (event) => {
+  const { filePaths } = await dialog.showOpenDialog({
+    properties: ["openDirectory"],
+  });
+
+  if (filePaths && filePaths.length > 0) {
+    event.sender.send("selected-directory", filePaths[0]);
+  }
+});
+
+ipcMain.on("receive-setup-path", async (_event, receivedPath) => {
+  filePath = path.join(receivedPath, "captainsLogs.json");
+  await writeConfig({ filePath, color: DEFAULT_THEME.color, theme: DEFAULT_THEME.theme });
+  logStore = new JsonStore(filePath);
+
+  if (setupWin && !setupWin.isDestroyed()) {
+    setupWin.close();
+    setupWin = null;
+  }
+
+  await createWindow();
+  createTutorialWindow();
+});
+
+ipcMain.on("request-hide", () => {
+  if (!win || win.isDestroyed()) {
+    return;
+  }
+
+  const [, height] = win.getSize();
+
+  if (height < 200) {
+    win.blur();
+  }
 });
 
 app.on("will-quit", () => {

@@ -41,6 +41,7 @@ body {
 #close-button{
     cursor: pointer;
     text-align: center;
+    min-width: 32px;
 }
 
 #close-button:hover{
@@ -52,13 +53,30 @@ body {
     padding: 10px;
 }
 
+button {
+    font-family: HKGrotesk;
+    font-size: smaller;
+    font-weight: 600;
+    color: white;
+    border: none;
+    outline: none;
+    padding: 5px;
+    margin: 5px;
+    border-radius: 3px;
+    background-color: tomato;
+}
+
+button:hover{
+    background-color: rgb(255, 120, 96);
+}
+
 h2 {
     font-size: medium;
     margin: 0;
     border-bottom: 2px solid tomato;
 }
 
-#tip {
+.tip {
     font-size: smaller;
     margin: 5px;
     font-family: HKGrotesk;

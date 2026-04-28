@@ -1,0 +1,176 @@
+﻿<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pomodoro Plugin</title>
+    <style>
+      :root { --theme-color: tomato; --bg: #f0f0eb; --panel: rgba(255,255,255,.72); --text: #161616; }
+      html[data-theme="dark"] { --bg: #121212; --panel: rgba(255,255,255,.06); --text: #f2f2f2; }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: radial-gradient(circle at top right, rgba(255,255,255,.35), transparent 38%), linear-gradient(135deg, color-mix(in srgb, var(--theme-color) 24%, var(--bg)) 0%, var(--bg) 66%); color: var(--text); font-family: Segoe UI, sans-serif; }
+      #main { display: grid; grid-template-rows: auto 1fr auto; width: 100%; height: 100%; padding: 18px; box-sizing: border-box; gap: 14px; }
+      #badge { width: fit-content; padding: 6px 10px; background: var(--theme-color); color: white; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+      #timer-card { display: grid; align-content: center; justify-items: center; gap: 10px; background: var(--panel); backdrop-filter: blur(12px); min-height: 0; }
+      #timer { font-size: clamp(42px, 12vw, 112px); font-weight: 800; line-height: .95; }
+      #status { font-size: 14px; opacity: .8; min-height: 18px; }
+      #help { padding: 12px 14px; background: rgba(0,0,0,.08); font-size: 14px; }
+    </style>
+    <script id="captainslog-plugin" type="application/json">
+      { "id": "pomodoro", "name": "Pomodoro", "command": "pomodoro", "aliases": ["pom"], "version": "1.0.0", "description": "Focus timer commands in the answer plane.", "capabilities": ["plugin-storage"], "defaultSize": "big" }
+    </script>
+  </head>
+  <body>
+    <div id="main">
+      <div id="badge">Pomodoro</div>
+      <section id="timer-card">
+        <div id="timer">25:00</div>
+        <div id="status">Idle</div>
+      </section>
+      <div id="help">Commands: 25, pause, resume, stop</div>
+    </div>
+    <script>
+      const PLUGIN_ID = "pomodoro";
+      const host = createHostBridge();
+      const state = { shellState: null, context: null, timerId: null, targetTimestamp: null, remainingSeconds: 0, paused: false };
+      const dom = { timer: document.getElementById("timer"), status: document.getElementById("status"), help: document.getElementById("help") };
+
+      host.onState(async (payload) => {
+        state.shellState = payload;
+        document.documentElement.style.setProperty("--theme-color", payload.theme.accentColor);
+        document.documentElement.setAttribute("data-theme", payload.theme.themeColor);
+        if (state.targetTimestamp === null && state.remainingSeconds === 0) {
+          const saved = await host.call("plugin:get-data", { pluginId: PLUGIN_ID });
+          restoreSavedState(saved);
+        }
+        render();
+      });
+
+      host.onContext((context) => {
+        state.context = context;
+        render();
+      });
+
+      host.onSubmit(async (context) => {
+        state.context = context;
+        await runCommand(context.args.trim());
+        render();
+      });
+
+      function createHostBridge() {
+        let requestId = 0;
+        const pending = new Map();
+        const listeners = { state: [], context: [], submit: [] };
+        window.addEventListener("message", (event) => {
+          const message = event.data;
+          if (!message || typeof message !== "object") return;
+          if (message.type === "captainslog:state") { listeners.state.forEach((listener) => listener(message.payload)); return; }
+          if (message.type === "captainslog:plugin-context") { listeners.context.forEach((listener) => listener(message.payload)); return; }
+          if (message.type === "captainslog:plugin-submit") { listeners.submit.forEach((listener) => listener(message.payload)); return; }
+          if (message.type === "captainslog:response") {
+            const resolver = pending.get(message.requestId);
+            if (!resolver) return;
+            pending.delete(message.requestId);
+            message.success ? resolver.resolve(message.result) : resolver.reject(new Error(message.error));
+          }
+        });
+        window.parent.postMessage({ type: "captainslog:plugin-ready" }, "*");
+        return {
+          call(method, params) {
+            requestId += 1;
+            return new Promise((resolve, reject) => {
+              pending.set(requestId, { resolve, reject });
+              window.parent.postMessage({ type: "captainslog:call", requestId, method, params }, "*");
+            });
+          },
+          onState(listener) { listeners.state.push(listener); },
+          onContext(listener) { listeners.context.push(listener); },
+          onSubmit(listener) { listeners.submit.push(listener); },
+        };
+      }
+
+      async function runCommand(command) {
+        if (!command) return;
+        if (/^\d+$/.test(command)) { startTimer(parseInt(command, 10) * 60); return; }
+        if (command === "pause") { pauseTimer(); return; }
+        if (command === "resume") { resumeTimer(); return; }
+        if (command === "stop") { stopTimer(); return; }
+        dom.status.textContent = 'Commands: 25, pause, resume, stop';
+      }
+
+      function startTimer(totalSeconds) {
+        clearTicker();
+        state.paused = false;
+        state.remainingSeconds = totalSeconds;
+        state.targetTimestamp = Date.now() + totalSeconds * 1000;
+        state.timerId = setInterval(tick, 250);
+        persistState();
+      }
+
+      function pauseTimer() {
+        if (!state.targetTimestamp) return;
+        state.remainingSeconds = Math.max(0, Math.ceil((state.targetTimestamp - Date.now()) / 1000));
+        state.targetTimestamp = null;
+        state.paused = true;
+        clearTicker();
+        persistState();
+      }
+
+      function resumeTimer() {
+        if (!state.paused || state.remainingSeconds <= 0) return;
+        state.paused = false;
+        state.targetTimestamp = Date.now() + state.remainingSeconds * 1000;
+        state.timerId = setInterval(tick, 250);
+        persistState();
+      }
+
+      function stopTimer() {
+        clearTicker();
+        state.targetTimestamp = null;
+        state.remainingSeconds = 0;
+        state.paused = false;
+        persistState();
+      }
+
+      function tick() {
+        if (!state.targetTimestamp) return;
+        const remaining = Math.max(0, Math.ceil((state.targetTimestamp - Date.now()) / 1000));
+        state.remainingSeconds = remaining;
+        if (remaining <= 0) {
+          clearTicker();
+          state.targetTimestamp = null;
+          state.paused = false;
+          playChime();
+        }
+        persistState();
+        render();
+      }
+
+      function clearTicker() { if (state.timerId) { clearInterval(state.timerId); state.timerId = null; } }
+
+      function render() {
+        const totalSeconds = state.targetTimestamp ? Math.max(0, Math.ceil((state.targetTimestamp - Date.now()) / 1000)) : state.remainingSeconds;
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        dom.timer.textContent = `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+        if (state.targetTimestamp) dom.status.textContent = "Running";
+        else if (state.paused) dom.status.textContent = "Paused";
+        else dom.status.textContent = totalSeconds > 0 ? "Ready to resume" : "Idle";
+        const inputPreview = state.context?.args?.trim() ? `Input: ${state.context.args.trim()}` : "Commands: 25, pause, resume, stop";
+        dom.help.textContent = inputPreview;
+      }
+
+      function persistState() { host.call("plugin:set-data", { pluginId: PLUGIN_ID, data: { targetTimestamp: state.targetTimestamp, remainingSeconds: state.remainingSeconds, paused: state.paused } }); }
+
+      function restoreSavedState(saved) {
+        if (!saved || typeof saved !== "object") return;
+        state.targetTimestamp = saved.targetTimestamp || null;
+        state.remainingSeconds = saved.remainingSeconds || 0;
+        state.paused = Boolean(saved.paused);
+        if (state.targetTimestamp && state.targetTimestamp > Date.now()) state.timerId = setInterval(tick, 250);
+        else if (state.targetTimestamp && state.targetTimestamp <= Date.now()) stopTimer();
+      }
+
+      function playChime() { const audio = new Audio("../public/assets/chime.mp3"); audio.play(); }
+    </script>
+  </body>
+</html>

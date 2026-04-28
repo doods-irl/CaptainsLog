@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notes Plugin</title>
+    <style>
+      :root { --theme-color: tomato; --text-color: #000; --background-color: #ccc; --textbox-color: #eee; --nav-inactive-color: #eee; --shadow-color: rgba(0,0,0,.16); }
+      html[data-theme="dark"] { --text-color: #ccc; --background-color: #191919; --textbox-color: #111; --nav-inactive-color: #444; }
+      html, body { margin: 0; width: 100%; height: 100%; background: var(--background-color); color: var(--text-color); overflow: hidden; font-family: Segoe UI, sans-serif; }
+      #main { display: grid; grid-template-rows: auto 60px minmax(0,1fr); width: 100%; height: 100%; }
+      #error-message { display: none; position: absolute; top: 38px; right: 10px; z-index: 4; max-width: 280px; padding: 5px 8px; background: var(--theme-color); color: white; font-size: 12px; }
+      #category-container { display: flex; gap: 4px; align-items: center; overflow-x: auto; overflow-y: hidden; min-height: 30px; padding: 4px 8px 0 4px; box-sizing: border-box; scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.18) transparent; }
+      .nav-element { appearance: none; border: 0; border-radius: 0; padding: 4px 8px; background: var(--nav-inactive-color); color: var(--text-color); cursor: pointer; white-space: nowrap; box-shadow: 0 1px 3px var(--shadow-color); }
+      .nav-element.selected { background: var(--theme-color); color: white; }
+      #textbox { width: 100%; height: 60px; box-sizing: border-box; border: 0; outline: none; padding: 10px 14px; font-size: 24px; font-weight: 700; background: var(--textbox-color); color: var(--text-color); }
+      #log-container { overflow-y: auto; overflow-x: hidden; min-height: 0; scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.18) transparent; }
+      h2 { margin: 0; padding: 6px 7px 4px; background: var(--textbox-color); border-top: 3px solid var(--theme-color); border-bottom: 3px solid var(--theme-color); border-radius: 0; text-align: center; position: sticky; top: 0; }
+      .category-log-container { padding-bottom: 4px; box-sizing: border-box; }
+      .log-item { display: block; width: calc(100% - 8px); margin: 4px; padding: 8px 10px; box-sizing: border-box; border: 0; outline: none; background: var(--nav-inactive-color); color: var(--text-color); box-shadow: 0 1px 3px var(--shadow-color); }
+      .log-item.selected { background: var(--theme-color); color: white; }
+      .log-item[data-log-status="done"] { text-decoration: line-through; color: #777; background: transparent; }
+      #category-container::-webkit-scrollbar, #log-container::-webkit-scrollbar { width: 8px; height: 8px; }
+      #category-container::-webkit-scrollbar-track, #log-container::-webkit-scrollbar-track { background: transparent; }
+      #category-container::-webkit-scrollbar-thumb, #log-container::-webkit-scrollbar-thumb { background: rgba(0,0,0,.18); border-radius: 999px; }
+      #category-container::-webkit-scrollbar-button, #log-container::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+    </style>
+    <script id="captainslog-plugin" type="application/json">
+      { "id": "notes", "name": "Notes", "version": "1.0.0", "description": "Keyboard-first capture and note navigation.", "capabilities": ["notes"], "defaultSize": "big" }
+    </script>
+  </head>
+  <body>
+    <div id="main">
+      <div id="error-message"></div>
+      <div id="category-container"></div>
+      <form id="text-form"><input id="textbox" type="text" placeholder="Type here..." autocomplete="off" required></form>
+      <div id="log-container"></div>
+    </div>
+    <script>
+      const host = createHostBridge();
+      const state = { shellState: null, navCategories: [], visibleCategories: [], currentCategoryIndex: 0, currentSelectedLogId: null, keysPressed: {}, debounceTimer: null, confirmation: { deletePending: false, deleteTimeoutId: null, emptyPending: false, emptyTimeoutId: null } };
+      const dom = { form: document.getElementById("text-form"), textbox: document.getElementById("textbox"), categoryContainer: document.getElementById("category-container"), logContainer: document.getElementById("log-container"), errorMessage: document.getElementById("error-message") };
+
+      host.onState((payload) => { state.shellState = payload; applyTheme(); render(); });
+      host.onEditorCommand((payload) => { if (payload.type === "reset-input") { resetInput(); render(); return; } if (payload.type === "prepare-show") { resetInput(); render(); focusTextbox(); } });
+      dom.form.addEventListener("submit", handleSubmit);
+      dom.textbox.addEventListener("input", () => { if (dom.textbox.value.trim() === "") { state.currentCategoryIndex = 0; } render(); });
+      window.addEventListener("keydown", handleKeyDown);
+      window.addEventListener("keyup", (event) => { delete state.keysPressed[event.key]; });
+
+      function createHostBridge() {
+        let requestId = 0;
+        const pending = new Map();
+        const listeners = { state: [], editorCommand: [] };
+        window.addEventListener("message", (event) => {
+          const message = event.data;
+          if (!message || typeof message !== "object") return;
+          if (message.type === "captainslog:state") { listeners.state.forEach((listener) => listener(message.payload)); return; }
+          if (message.type === "captainslog:editor-command") { listeners.editorCommand.forEach((listener) => listener(message.payload)); return; }
+          if (message.type === "captainslog:response") {
+            const resolver = pending.get(message.requestId);
+            if (!resolver) return;
+            pending.delete(message.requestId);
+            message.success ? resolver.resolve(message.result) : resolver.reject(new Error(message.error));
+          }
+        });
+        window.parent.postMessage({ type: "captainslog:plugin-ready" }, "*");
+        return {
+          call(method, params) {
+            requestId += 1;
+            return new Promise((resolve, reject) => {
+              pending.set(requestId, { resolve, reject });
+              window.parent.postMessage({ type: "captainslog:call", requestId, method, params }, "*");
+            });
+          },
+          onState(listener) { listeners.state.push(listener); },
+          onEditorCommand(listener) { listeners.editorCommand.push(listener); },
+        };
+      }
+
+      function applyTheme() {
+        if (!state.shellState) return;
+        document.documentElement.style.setProperty("--theme-color", state.shellState.theme.accentColor);
+        document.documentElement.setAttribute("data-theme", state.shellState.theme.themeColor);
+      }
+
+      function render() {
+        if (!state.shellState) return;
+        buildCategoryList();
+        state.visibleCategories = getVisibleCategories();
+        clampSelection();
+        renderCategories();
+        renderLogs();
+        updateTextboxColor();
+        restoreFocus();
+      }
+
+      function buildCategoryList() {
+        const activeCategories = state.shellState.notes.categories.filter((category) => category.status !== "deleted");
+        const notesCategory = activeCategories.find((category) => category.name.toLowerCase() === "notes") || { name: "notes", logs: [] };
+        const grouped = new Map();
+        activeCategories.forEach((category) => {
+          if (category.name.toLowerCase() === "notes") return;
+          const [mainCategory] = category.name.split(":");
+          if (!grouped.has(mainCategory)) grouped.set(mainCategory, []);
+          grouped.get(mainCategory).push(category);
+        });
+        const ordered = [notesCategory];
+        Array.from(grouped.values()).forEach((group) => { group.sort((left, right) => left.name.localeCompare(right.name)); ordered.push(...group); });
+        state.navCategories = ordered.map((category) => ({ name: category.name.toLowerCase(), displayName: category.name, isSubcategory: category.name.includes(":") }));
+      }
+
+      function getCategoryFilter() {
+        if (/^\/[\w.-]+(:[\w.-]+)? $/.test(dom.textbox.value)) return "";
+        const trimmed = dom.textbox.value.trim();
+        if (!trimmed.startsWith("/")) return "";
+        return trimmed.substring(1).split(" ")[0].toLowerCase();
+      }
+
+      function getVisibleCategories() {
+        const filter = getCategoryFilter();
+        return state.navCategories.filter((category) => {
+          if (!filter) return !category.isSubcategory;
+          if (category.isSubcategory && !filter.includes(":")) return false;
+          return category.name.startsWith(filter);
+        });
+      }
+
+      function clampSelection() {
+        if (state.visibleCategories.length === 0) { state.currentCategoryIndex = 0; return; }
+        state.currentCategoryIndex = Math.max(0, Math.min(state.currentCategoryIndex, state.visibleCategories.length - 1));
+      }
+
+      function getSelectedCategory() { return state.visibleCategories[state.currentCategoryIndex] || state.visibleCategories[0] || null; }
+
+      function renderCategories() {
+        dom.categoryContainer.innerHTML = "";
+        state.visibleCategories.forEach((category, index) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "nav-element";
+          button.textContent = hasSubcategories(category.name) && !category.isSubcategory ? `${category.displayName} *` : category.displayName;
+          if (index === state.currentCategoryIndex) button.classList.add("selected");
+          button.addEventListener("click", () => { state.currentCategoryIndex = index; state.currentSelectedLogId = null; syncTextboxToSelection(); render(); focusTextbox(); });
+          dom.categoryContainer.appendChild(button);
+        });
+      }
+
+      function hasSubcategories(categoryName) { return state.navCategories.some((category) => category.isSubcategory && category.name.startsWith(`${categoryName}:`)); }
+
+      function renderLogs() {
+        dom.logContainer.innerHTML = "";
+        const selectedCategory = getSelectedCategory();
+        if (!selectedCategory) return;
+        const container = document.createElement("div");
+        container.className = "category-log-container";
+        const header = document.createElement("h2");
+        header.textContent = selectedCategory.name;
+        container.appendChild(header);
+        getSortedLogsForCategory(selectedCategory.name).forEach((log) => {
+          const input = document.createElement("input");
+          input.type = "text";
+          input.value = log.content;
+          input.className = "log-item";
+          input.dataset.category = selectedCategory.name;
+          input.dataset.logId = String(log.id);
+          input.dataset.logStatus = log.status;
+          input.disabled = log.status === "done";
+          if (state.currentSelectedLogId === log.id) input.classList.add("selected");
+          input.addEventListener("focus", () => { state.currentSelectedLogId = log.id; });
+          input.addEventListener("input", () => { queueLogEdit(input.value, selectedCategory.name, log.id); });
+          container.appendChild(input);
+        });
+        dom.logContainer.appendChild(container);
+      }
+
+      function getSortedLogsForCategory(categoryName) {
+        const category = state.shellState.notes.categories.find((entry) => entry.name.toLowerCase() === categoryName && entry.status !== "deleted");
+        if (!category) return [];
+        return category.logs.filter((log) => log.status !== "deleted").slice().sort((left, right) => left.status === right.status ? left.id - right.id : left.status === "active" ? -1 : 1);
+      }
+
+      function queueLogEdit(content, category, id) {
+        if (state.debounceTimer) clearTimeout(state.debounceTimer);
+        state.debounceTimer = setTimeout(() => {
+          host.call("notes:edit-logs", { logDataArray: [{ content, category, id: String(id) }] });
+        }, 500);
+      }
+
+      function restoreFocus() {
+        if (state.currentSelectedLogId == null) return;
+        const selected = dom.logContainer.querySelector(`[data-log-id="${state.currentSelectedLogId}"]`);
+        if (!selected) { state.currentSelectedLogId = null; return; }
+        selected.focus();
+        selected.selectionStart = selected.selectionEnd = selected.value.length;
+      }
+
+      function focusTextbox() { state.currentSelectedLogId = null; dom.textbox.focus(); dom.textbox.selectionStart = dom.textbox.selectionEnd = dom.textbox.value.length; }
+      function resetInput() { dom.textbox.value = ""; state.currentCategoryIndex = 0; state.currentSelectedLogId = null; }
+      function syncTextboxToSelection() { const selectedCategory = getSelectedCategory(); dom.textbox.value = !selectedCategory || selectedCategory.name === "notes" ? "" : `/${selectedCategory.name} `; }
+
+      function updateTextboxColor() {
+        const inputValue = dom.textbox.value.trim();
+        if (inputValue.startsWith("delete:") || inputValue.startsWith("empty:") || /^\/[\w.-]+(:[\w.-]+)?\s*\/d$/.test(inputValue) || /^\/[\w.-]+(:[\w.-]+)?\s*\/e$/.test(inputValue)) dom.textbox.style.color = "tomato";
+        else if (/^\/[\w.-]+(:[\w.-]+)?\s*\/m\d+$/.test(inputValue)) dom.textbox.style.color = "slateblue";
+        else dom.textbox.style.color = "var(--text-color)";
+      }
+
+      async function handleSubmit(event) {
+        event.preventDefault();
+        const textboxValue = dom.textbox.value.trim();
+        if (!textboxValue) return;
+        if (/^\/\s/.test(textboxValue)) { displayError("A blank category name? Not allowed I'm afraid.", 4000); return; }
+        if (textboxValue === "plugins") { await showInstalledPlugins(); return; }
+        if (textboxValue.startsWith("plugin:")) { await launchPlugin(textboxValue.substring(7).trim().toLowerCase()); return; }
+        if (textboxValue.startsWith("delete:")) { await submitCategoryDelete(textboxValue.substring(7).toLowerCase()); return; }
+        if (textboxValue.startsWith("empty:")) { await submitCategoryEmpty(textboxValue.substring(6).toLowerCase()); return; }
+        if (textboxValue.startsWith("/")) { await submitCategoryCommand(textboxValue); return; }
+        await host.call("notes:add-entry", { formData: textboxValue });
+        dom.textbox.value = "";
+        if (state.shellState.editorMode === "mini") host.call("shell:request-hide", {});
+      }
+
+      async function submitCategoryDelete(categoryName) {
+        if (categoryName === "notes") { displayError("You can't delete the notes category!", 4000); return; }
+        if (!categoryExists(categoryName)) { displayError(`Category '${categoryName}' not found.`, 4000); return; }
+        await host.call("notes:delete-category", { categoryName });
+        dom.textbox.value = "delete:";
+      }
+
+      async function showInstalledPlugins() {
+        const plugins = await host.call("shell:list-plugins", {});
+        const extras = plugins.filter((plugin) => plugin.id !== "notes");
+        if (extras.length === 0) { displayError("No extra plugins installed.", 4000); return; }
+        displayError(`Plugins: ${extras.map((plugin) => plugin.id).join(", ")}`, 6000);
+      }
+
+      async function launchPlugin(pluginId) {
+        if (!pluginId) { displayError('Use "plugin:<id>" or "plugins".', 4000); return; }
+        if (pluginId === "notes") { await host.call("shell:activate-notes", {}); return; }
+        try {
+          await host.call("shell:activate-plugin", { pluginId });
+          dom.textbox.value = "";
+        } catch (error) {
+          displayError(error.message || `Unknown plugin '${pluginId}'.`, 5000);
+        }
+      }
+
+      async function submitCategoryEmpty(categoryName) {
+        if (!categoryExists(categoryName)) { displayError(`Category '${categoryName}' not found.`, 4000); return; }
+        await host.call("notes:empty-category", { categoryName });
+        dom.textbox.value = "empty:";
+      }
+
+      async function submitCategoryCommand(textboxValue) {
+        const splitData = textboxValue.split(" ");
+        const category = splitData[0].substring(1).toLowerCase();
+        const content = splitData.slice(1).join(" ");
+        if (content === "/d") { await confirmCategoryDelete(category); return; }
+        if (content === "/e") { await confirmCategoryEmpty(category); return; }
+        if (content.startsWith("/m")) { await moveCategory(category, content); return; }
+        await host.call("notes:add-entry", { formData: textboxValue });
+        dom.textbox.value = category ? `/${category} ` : "";
+        if (state.shellState.editorMode === "mini") host.call("shell:request-hide", {});
+      }
+
+      async function confirmCategoryDelete(category) {
+        if (!categoryExists(category)) { displayError("This category doesn't exist.", 4000); return; }
+        if (!state.confirmation.deletePending) {
+          displayError("Type /d and enter again to confirm category deletion.", 8000);
+          state.confirmation.deletePending = true;
+          state.confirmation.deleteTimeoutId = setTimeout(() => { state.confirmation.deletePending = false; }, 8000);
+          return;
+        }
+        clearTimeout(state.confirmation.deleteTimeoutId);
+        state.confirmation.deletePending = false;
+        await host.call("notes:delete-category", { categoryName: category });
+        resetInput();
+      }
+
+      async function confirmCategoryEmpty(category) {
+        if (!categoryExists(category)) { displayError("This category doesn't exist.", 4000); return; }
+        if (!state.confirmation.emptyPending) {
+          displayError("Type /e and enter again to confirm category empty.", 8000);
+          state.confirmation.emptyPending = true;
+          state.confirmation.emptyTimeoutId = setTimeout(() => { state.confirmation.emptyPending = false; }, 8000);
+          return;
+        }
+        clearTimeout(state.confirmation.emptyTimeoutId);
+        state.confirmation.emptyPending = false;
+        await host.call("notes:empty-category", { categoryName: category });
+        dom.textbox.value = `/${category} `;
+      }
+
+      async function moveCategory(category, command) {
+        if (!categoryExists(category)) { displayError("This category doesn't exist.", 4000); return; }
+        const match = command.match(/^\/m(\d+)$/);
+        if (!match) { displayError("No valid number found after '/m'.", 4000); return; }
+        await host.call("notes:move-category", { categoryName: category, position: parseInt(match[1], 10) });
+      }
+
+      function categoryExists(categoryName) { return state.navCategories.some((category) => category.name === categoryName); }
+      function displayError(message, duration) { dom.errorMessage.textContent = message; dom.errorMessage.style.display = "block"; focusTextbox(); setTimeout(() => { dom.errorMessage.style.display = "none"; }, duration); }
+
+      function handleKeyDown(event) {
+        state.keysPressed[event.key] = true;
+        if (state.currentSelectedLogId == null) {
+          if (event.key === "ArrowRight" && !state.keysPressed.Shift) selectNav(1);
+          else if (event.key === "ArrowLeft" && !state.keysPressed.Shift) selectNav(-1);
+          else if (event.key === "Enter" && /^\/[\w.-]+ $/.test(dom.textbox.value)) { resetInput(); render(); }
+        }
+        if (event.key === "Tab") { event.preventDefault(); focusTextbox(); selectNav(state.keysPressed.Shift ? -1 : 1); }
+        handleTextboxShortcuts(event);
+        handleLogSelection(event);
+      }
+
+      function handleTextboxShortcuts(event) {
+        if (document.activeElement !== dom.textbox) return;
+        if (event.key === "Backspace") {
+          if (dom.textbox.value === "delete:" || dom.textbox.value === "empty:") { resetInput(); render(); return; }
+          if (/^\/[\w.-]+:[^ ]+ $/.test(dom.textbox.value) || /^\/[\w.-]+:$/.test(dom.textbox.value)) { dom.textbox.value = `${dom.textbox.value.substring(0, dom.textbox.value.lastIndexOf(":"))} `; render(); return; }
+          if (/^\/[\w.-]+:([^ ]+)? $/.test(dom.textbox.value) || /^\/[\w.-]+ $/.test(dom.textbox.value)) { resetInput(); render(); return; }
+        }
+        if (event.key === ":" && /^\/[\w.-]+ $/.test(dom.textbox.value)) dom.textbox.value = dom.textbox.value.replace(" ", "");
+        if (event.key === " ") {
+          const match = /^\/([\w.-]+)(?::([\w.-]+))?$/.exec(dom.textbox.value);
+          if (!match) return;
+          const potentialCategory = match[1] + (match[2] ? `:${match[2]}` : "");
+          if (categoryExists(potentialCategory.toLowerCase())) { event.preventDefault(); render(); }
+        }
+      }
+
+      function selectNav(direction) {
+        if (state.visibleCategories.length === 0) return;
+        state.currentSelectedLogId = null;
+        state.currentCategoryIndex = Math.max(0, Math.min(state.currentCategoryIndex + direction, state.visibleCategories.length - 1));
+        syncTextboxToSelection();
+        render();
+        focusTextbox();
+      }
+
+      function handleLogSelection(event) {
+        if (state.shellState?.editorMode === "mini") return;
+        if (event.key === "ArrowDown" && !state.keysPressed.Shift) { selectLog(true); return; }
+        if (event.key === "ArrowUp" && !state.keysPressed.Shift) { selectLog(false); return; }
+        if (state.keysPressed.Shift && event.key === "ArrowUp") { focusTextbox(); render(); return; }
+        if (state.keysPressed.Shift && event.key === "ArrowDown") { selectBoundingLog(false); return; }
+        if (state.keysPressed.Shift && event.key === "Enter" && state.currentSelectedLogId != null) { toggleDone(); return; }
+        if (state.keysPressed.Shift && event.key === "Delete" && state.currentSelectedLogId != null) deleteSelectedLog();
+      }
+
+      function getCurrentRenderedLogs() { return Array.from(dom.logContainer.querySelectorAll(".log-item")); }
+      function selectLog(down) {
+        const logs = getCurrentRenderedLogs();
+        if (logs.length === 0) return;
+        const currentIndex = logs.findIndex((log) => Number(log.dataset.logId) === state.currentSelectedLogId);
+        const nextIndex = currentIndex + (down ? 1 : -1);
+        if (nextIndex < 0) { state.currentSelectedLogId = null; render(); focusTextbox(); return; }
+        if (nextIndex >= logs.length) return;
+        state.currentSelectedLogId = Number(logs[nextIndex].dataset.logId);
+        render();
+      }
+
+      function selectBoundingLog(top) {
+        const logs = getCurrentRenderedLogs();
+        if (logs.length === 0) return;
+        state.currentSelectedLogId = Number(logs[top ? 0 : logs.length - 1].dataset.logId);
+        render();
+      }
+
+      async function deleteSelectedLog() {
+        const selectedCategory = getSelectedCategory();
+        if (!selectedCategory || state.currentSelectedLogId == null) return;
+        await host.call("notes:delete-logs", { logDataArray: [{ logCategory: selectedCategory.name, logId: String(state.currentSelectedLogId) }] });
+        state.currentSelectedLogId = null;
+      }
+
+      async function toggleDone() {
+        const selectedCategory = getSelectedCategory();
+        if (!selectedCategory || state.currentSelectedLogId == null) return;
+        await host.call("notes:toggle-done", { logDataArray: [{ logCategory: selectedCategory.name, logId: state.currentSelectedLogId }] });
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transform Plugin</title>
+    <style>
+      :root { --theme-color: tomato; --bg: #eee8df; --panel: rgba(255,255,255,.78); --text: #171717; --muted: rgba(0,0,0,.65); }
+      html[data-theme="dark"] { --bg: #101010; --panel: rgba(255,255,255,.06); --text: #f2f2f2; --muted: rgba(255,255,255,.72); }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: radial-gradient(circle at top left, rgba(255,255,255,.22), transparent 35%), linear-gradient(145deg, color-mix(in srgb, var(--theme-color) 14%, var(--bg)) 0%, var(--bg) 70%); color: var(--text); font-family: Segoe UI, sans-serif; }
+      #main { display: grid; grid-template-rows: auto auto 1fr auto; gap: 14px; width: 100%; height: 100%; padding: 18px; box-sizing: border-box; }
+      #badge { width: fit-content; padding: 6px 10px; background: var(--theme-color); color: white; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+      #mode { font-size: 15px; color: var(--muted); }
+      #output { min-height: 0; overflow: auto; padding: 16px; background: var(--panel); backdrop-filter: blur(10px); font-size: 26px; font-weight: 700; line-height: 1.25; white-space: pre-wrap; word-break: break-word; }
+      #help { padding: 12px 14px; background: rgba(0,0,0,.08); font-size: 14px; }
+      #output::-webkit-scrollbar { width: 8px; }
+      #output::-webkit-scrollbar-track { background: transparent; }
+      #output::-webkit-scrollbar-thumb { background: rgba(0,0,0,.18); border-radius: 999px; }
+    </style>
+    <script id="captainslog-plugin" type="application/json">
+      { "id": "transform", "name": "Transform", "command": "transform", "aliases": ["xform", "text"], "version": "1.0.0", "description": "Quick text case and slug transforms.", "capabilities": [], "defaultSize": "big" }
+    </script>
+  </head>
+  <body>
+    <div id="main">
+      <div id="badge">Transform</div>
+      <div id="mode">Mode: upper</div>
+      <section id="output">HELLO WORLD</section>
+      <div id="help">Commands: upper, lower, title, slug, snake, kebab, camel, trim. Press Enter to copy the result and clear the bar.</div>
+    </div>
+    <script>
+      const dom = {
+        mode: document.getElementById("mode"),
+        output: document.getElementById("output"),
+      };
+
+      const state = {
+        lastArgs: "",
+        lastResult: "HELLO WORLD",
+      };
+
+      window.addEventListener("message", async (event) => {
+        const message = event.data;
+        if (!message || typeof message !== "object") return;
+        if (message.type === "captainslog:state") {
+          document.documentElement.style.setProperty("--theme-color", message.payload.theme.accentColor);
+          document.documentElement.setAttribute("data-theme", message.payload.theme.themeColor);
+          return;
+        }
+        if (message.type === "captainslog:plugin-context") {
+          state.lastArgs = message.payload.args || "";
+          renderTransform(state.lastArgs);
+          return;
+        }
+        if (message.type === "captainslog:plugin-submit") {
+          state.lastArgs = message.payload.args || "";
+          renderTransform(state.lastArgs);
+          await copyAndReset();
+        }
+      });
+
+      window.parent.postMessage({ type: "captainslog:plugin-ready" }, "*");
+
+      function renderTransform(input) {
+        const result = getTransformResult(input);
+        dom.mode.textContent = result.modeLabel;
+        dom.output.textContent = result.output;
+        state.lastResult = result.copyText;
+      }
+
+      function getTransformResult(input) {
+        const trimmed = input.trim();
+        if (!trimmed) {
+          return {
+            modeLabel: "Mode: upper",
+            output: "HELLO WORLD",
+            copyText: "HELLO WORLD",
+          };
+        }
+
+        const firstSpace = trimmed.indexOf(" ");
+        const command = (firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace)).toLowerCase();
+        const rawText = firstSpace === -1 ? "" : trimmed.slice(firstSpace + 1);
+        const words = tokenize(rawText);
+
+        const operations = {
+          upper: () => rawText.toUpperCase(),
+          lower: () => rawText.toLowerCase(),
+          title: () => words.map(capitalize).join(" "),
+          slug: () => words.join("-"),
+          snake: () => words.join("_"),
+          kebab: () => words.join("-"),
+          camel: () => words.length === 0 ? "" : words[0] + words.slice(1).map(capitalize).join(""),
+          trim: () => rawText.trim(),
+        };
+
+        if (!operations[command]) {
+          return {
+            modeLabel: "Mode: unknown",
+            output: "Use one of: upper, lower, title, slug, snake, kebab, camel, trim",
+            copyText: "",
+          };
+        }
+
+        const output = operations[command]();
+        return {
+          modeLabel: `Mode: ${command}`,
+          output,
+          copyText: output,
+        };
+      }
+
+      function tokenize(value) {
+        return value
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, " ")
+          .split(/\s+/)
+          .filter(Boolean);
+      }
+
+      function capitalize(value) {
+        return value ? value[0].toUpperCase() + value.slice(1) : "";
+      }
+
+      async function copyAndReset() {
+        if (!state.lastResult) {
+          return;
+        }
+
+        await callHost("clipboard:write-text", { text: state.lastResult });
+        await callHost("shell:reset-input", {});
+      }
+
+      function callHost(method, params) {
+        const requestId = `transform-${Date.now()}-${Math.random()}`;
+        return new Promise((resolve, reject) => {
+          function onMessage(event) {
+            const message = event.data;
+            if (!message || message.type !== "captainslog:response" || message.requestId !== requestId) {
+              return;
+            }
+            window.removeEventListener("message", onMessage);
+            if (message.success) {
+              resolve(message.result);
+            } else {
+              reject(new Error(message.error));
+            }
+          }
+
+          window.addEventListener("message", onMessage);
+          window.parent.postMessage({ type: "captainslog:call", requestId, method, params }, "*");
+        });
+      }
+    </script>
+  </body>
+</html>

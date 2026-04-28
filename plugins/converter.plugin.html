@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Converter Plugin</title>
+    <style>
+      :root { --theme-color: tomato; --bg: #efece4; --panel: rgba(255,255,255,.78); --text: #171717; --muted: rgba(0,0,0,.65); }
+      html[data-theme="dark"] { --bg: #121212; --panel: rgba(255,255,255,.06); --text: #f3f3f3; --muted: rgba(255,255,255,.72); }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: linear-gradient(145deg, color-mix(in srgb, var(--theme-color) 16%, var(--bg)) 0%, var(--bg) 70%); color: var(--text); font-family: Segoe UI, sans-serif; }
+      #main { display: grid; grid-template-rows: auto 1fr auto; gap: 14px; width: 100%; height: 100%; padding: 18px; box-sizing: border-box; }
+      #badge { width: fit-content; padding: 6px 10px; background: var(--theme-color); color: white; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+      #result { display: grid; gap: 8px; align-content: center; justify-items: center; min-height: 0; background: var(--panel); backdrop-filter: blur(10px); padding: 18px; text-align: center; }
+      #value { font-size: clamp(28px, 8vw, 74px); font-weight: 800; line-height: 1; }
+      #detail { font-size: 15px; color: var(--muted); }
+      #help { padding: 12px 14px; background: rgba(0,0,0,.08); font-size: 14px; }
+    </style>
+    <script id="captainslog-plugin" type="application/json">
+      { "id": "converter", "name": "Converter", "command": "converter", "aliases": ["conv", "convert"], "version": "1.0.0", "description": "Quick unit conversions from the notes bar.", "capabilities": [], "defaultSize": "big" }
+    </script>
+  </head>
+  <body>
+    <div id="main">
+      <div id="badge">Converter</div>
+      <section id="result">
+        <div id="value">0</div>
+        <div id="detail">Type a value and units.</div>
+      </section>
+      <div id="help">Examples: 10 km mi, 72 f c, 5 kg lb, 120 min hr</div>
+    </div>
+    <script>
+      const dom = {
+        value: document.getElementById("value"),
+        detail: document.getElementById("detail"),
+      };
+
+      const unitTable = {
+        mm: { family: "length", toBase: 0.001 },
+        cm: { family: "length", toBase: 0.01 },
+        m: { family: "length", toBase: 1 },
+        km: { family: "length", toBase: 1000 },
+        in: { family: "length", toBase: 0.0254 },
+        ft: { family: "length", toBase: 0.3048 },
+        yd: { family: "length", toBase: 0.9144 },
+        mi: { family: "length", toBase: 1609.344 },
+        g: { family: "mass", toBase: 1 },
+        kg: { family: "mass", toBase: 1000 },
+        oz: { family: "mass", toBase: 28.349523125 },
+        lb: { family: "mass", toBase: 453.59237 },
+        sec: { family: "time", toBase: 1 },
+        s: { family: "time", toBase: 1 },
+        min: { family: "time", toBase: 60 },
+        hr: { family: "time", toBase: 3600 },
+        h: { family: "time", toBase: 3600 },
+        day: { family: "time", toBase: 86400 },
+      };
+
+      window.addEventListener("message", (event) => {
+        const message = event.data;
+        if (!message || typeof message !== "object") return;
+        if (message.type === "captainslog:state") {
+          document.documentElement.style.setProperty("--theme-color", message.payload.theme.accentColor);
+          document.documentElement.setAttribute("data-theme", message.payload.theme.themeColor);
+          return;
+        }
+        if (message.type === "captainslog:plugin-context") {
+          renderConversion(message.payload.args || "");
+        }
+      });
+
+      window.parent.postMessage({ type: "captainslog:plugin-ready" }, "*");
+
+      function renderConversion(input) {
+        const trimmed = input.trim().toLowerCase();
+        if (!trimmed) {
+          dom.value.textContent = "0";
+          dom.detail.textContent = "Type a value and units.";
+          return;
+        }
+
+        const parts = trimmed.split(/\s+/);
+        if (parts.length < 3) {
+          dom.value.textContent = "?";
+          dom.detail.textContent = "Expected format: <value> <from-unit> <to-unit>.";
+          return;
+        }
+
+        const amount = Number(parts[0]);
+        const from = normalizeUnit(parts[1]);
+        const to = normalizeUnit(parts[2]);
+
+        if (!Number.isFinite(amount) || !from || !to) {
+          dom.value.textContent = "?";
+          dom.detail.textContent = "Supported families: length, mass, time, and temperature.";
+          return;
+        }
+
+        const result = convert(amount, from, to);
+        if (result == null) {
+          dom.value.textContent = "?";
+          dom.detail.textContent = "Units must belong to the same family.";
+          return;
+        }
+
+        dom.value.textContent = formatNumber(result);
+        dom.detail.textContent = `${formatNumber(amount)} ${from} = ${formatNumber(result)} ${to}`;
+      }
+
+      function normalizeUnit(unit) {
+        const aliases = {
+          meter: "m", meters: "m", metre: "m", metres: "m",
+          kilometer: "km", kilometers: "km", kilometre: "km", kilometres: "km",
+          inch: "in", inches: "in", foot: "ft", feet: "ft", yard: "yd", yards: "yd",
+          mile: "mi", miles: "mi",
+          gram: "g", grams: "g", kilogram: "kg", kilograms: "kg",
+          ounce: "oz", ounces: "oz", pound: "lb", pounds: "lb",
+          second: "sec", seconds: "sec", minute: "min", minutes: "min",
+          hour: "hr", hours: "hr", day: "day", days: "day",
+          celsius: "c", fahrenheit: "f", kelvin: "k",
+        };
+        const normalized = aliases[unit] || unit;
+        if (normalized === "c" || normalized === "f" || normalized === "k") {
+          return normalized;
+        }
+        return unitTable[normalized] ? normalized : null;
+      }
+
+      function convert(amount, from, to) {
+        if (isTemperature(from) || isTemperature(to)) {
+          if (!isTemperature(from) || !isTemperature(to)) {
+            return null;
+          }
+          return convertTemperature(amount, from, to);
+        }
+
+        const fromUnit = unitTable[from];
+        const toUnit = unitTable[to];
+        if (!fromUnit || !toUnit || fromUnit.family !== toUnit.family) {
+          return null;
+        }
+
+        return (amount * fromUnit.toBase) / toUnit.toBase;
+      }
+
+      function isTemperature(unit) {
+        return unit === "c" || unit === "f" || unit === "k";
+      }
+
+      function convertTemperature(amount, from, to) {
+        let celsius = amount;
+        if (from === "f") celsius = (amount - 32) * (5 / 9);
+        if (from === "k") celsius = amount - 273.15;
+        if (to === "c") return celsius;
+        if (to === "f") return celsius * (9 / 5) + 32;
+        if (to === "k") return celsius + 273.15;
+        return null;
+      }
+
+      function formatNumber(value) {
+        return Number(value.toFixed(6)).toString();
+      }
+    </script>
+  </body>
+</html>

@@ -1,920 +1,490 @@
-let textbox;
-let categories;
-let mainCategories = {};
-let currentCategory;
-let currentSelectedLog = null;
-let keysPressed = {};
-let selectedIndex;
-let debounceTimer;
-let isConfirmationPending = false;
-let confirmationTimeout;
-let isConfirmationPendingForEmpty = false;
-let confirmationTimeoutForEmpty;
-let pomodoroTimerId = null;
-let timeLeftInSeconds = 0;
-let isTimerPaused = false;
-let pomodoroCategory = null;
-let content;
-let subcategories;
+import { dom, state, cacheDom } from "./renderer/state.js";
+import { categoryExists, getSelectedCategory } from "./renderer/model.js";
+import { applyTheme, displayError, focusTextbox, renderApp, resetNavigationAndTextbox, syncTextboxToSelection } from "./renderer/view.js";
+import { pausePomodoroTimer, resumePomodoroTimer, startPomodoroTimer, stopPomodoroTimer, updateTimerDisplay } from "./renderer/pomodoro.js";
+
+const beginPomodoroTimer = startPomodoroTimer(state, dom, () => {});
 
 document.addEventListener("DOMContentLoaded", () => {
-  textbox = document.getElementById("textbox");
-  window.electronAPI.refreshLogs();
-  initialiseForm();
-  hideSubcategories();
+  cacheDom();
+  registerElectronListeners();
+  registerDomListeners();
+  window.electronAPI.requestAppState();
 });
 
-function focusText() {
-  unselectAllLogs();
-  scrollToTopOfLog();
-  if (textbox) {
-    textbox.focus();
-  }
-}
-
-function clearText() {
-  if (textbox) {
-    textbox.value = "";
-  }
-  filterCategories("");
-  showAllCategories();
-  hideSubcategories();
-}
-
-function setTheme(accentColor, themeColor) {
-  document.documentElement.style.setProperty("--theme-color", `${accentColor}`);
-  document.documentElement.setAttribute("data-theme", themeColor);
-}
-
-function resetNavigationAndTextbox() {
-  clearText();
-  setTimeout(() => { selectNav(0); }, 20);
-}
-
-function handleTab(event) {
-  if (event.key !== "Tab") return;
-  event.preventDefault();
-  focusText();
-  selectNav(keysPressed["Shift"] ? -1 : 1);
-}
-
-function handleArrowKeys(event) {
-  if (!currentSelectedLog) {
-    if (event.key === "ArrowRight" && !keysPressed["Shift"]) {
-      selectNav(1);
-    } else if (event.key === "ArrowLeft" && !keysPressed["Shift"]) {
-      selectNav(-1);
-    } else if (event.key === "Enter" && textbox.value.match(/^\/\w+ $/)) {
-      resetNavigationAndTextbox();
-    }
-  }
-}
-
-function handleCommandShortcuts(event) {
-  if (event.key === "Backspace") {
-    if (document.activeElement === textbox) {
-      if (textbox.value === "delete:" || textbox.value === "empty:") {
-        resetNavigationAndTextbox();
-      } else if (textbox.value.match(/^\/\w+:[^ ]+ $/)) {
-        const navElements = Array.from(document.querySelectorAll(".nav-element:not(.hidden)"));
-        resetNavElementsStyle(navElements);
-        textbox.value = textbox.value.substring(0, textbox.value.lastIndexOf(":")) + " ";
-        setTimeout(() => { selectNav(0); }, 20);
-      } else if (textbox.value.match(/^\/\w+:$/)) {
-        textbox.value = textbox.value.substring(0, textbox.value.lastIndexOf(":")) + " ";
-        setTimeout(() => { selectNav(0); }, 20);
-      } else if (
-        textbox.value.match(/^\/\w+:([^ ]+)? $/) ||
-        textbox.value.match(/^\/\w+ $/)
-      ) {
-        resetNavigationAndTextbox();
-      }
-    }
-  }
-
-  if (event.key === ":" && textbox.value.match(/^\/\w+ $/)) {
-    textbox.value = textbox.value.replace(" ", "");
-  }
-
-  if (event.key === " ") {
-    const categoryRegex = /^\/(\w+)(?::(\w+))?$/;
-    const match = categoryRegex.exec(textbox.value);
-
-    if (match) {
-      let potentialCategory = match[1] + (match[2] ? ":" + match[2] : "");
-
-      if (Array.isArray(categories) && categories.some(category => category === potentialCategory)) {
-        event.preventDefault();
-        selectNav(0);
-      }
-    }
-  }
-}
-
-function handleLogSelection(event) {
-  if (window.innerHeight > 200) {
-    if (event.key === "ArrowDown" && !keysPressed["Shift"]) {
-      selectLog(true);
-    } else if (event.key === "ArrowUp" && !keysPressed["Shift"]) {
-      selectLog(false);
-    } else if (keysPressed["Shift"] && event.key === "ArrowUp") {
-      focusText();
-    } else if (keysPressed["Shift"] && event.key === "ArrowDown") {
-      selectBoundingLog(false);
-    } else if (
-      keysPressed["Shift"] &&
-      event.key === "Enter" &&
-      currentSelectedLog
-    ) {
-      markDone();
-    } else if (
-      keysPressed["Shift"] &&
-      event.key === "Delete" &&
-      currentSelectedLog
-    ) {
-      deleteLog();
-    }
-  }
-}
-
-window.addEventListener("keydown", function (event) {
-  keysPressed[event.key] = true;
-
-  handleArrowKeys(event);
-  handleTab(event);
-  handleCommandShortcuts(event);
-  handleLogSelection(event);
-});
-
-window.addEventListener("keyup", (event) => {
-  delete keysPressed[event.key];
-});
-
-function renderLogs(logs) {
-  const categoryContainer = document.getElementById("category-container");
-  const logContainer = document.getElementById("log-container");
-  categories = [];
-
-  prepareCategoryContainer("notes", categoryContainer, logContainer);
-  prepareCategoryLogContainer("notes", null, logContainer);
-
-  if (!logs.categories || logs.categories.length === 0) {
-    return;
-  }
-
-  const categoryGroups = groupAndSortCategories(logs.categories);
-
-  categoryGroups.forEach(group => {
-    group.forEach(category => {
-      if (category.status === "deleted") { return; }
-
-      categories.push(category.name.toLowerCase());
-
-      let lcCategory = category.name.toLowerCase();
-      let [mainCategory, subCategory] = category.name.toLowerCase().split(':');
-
-      if (subCategory) {
-        mainCategories[mainCategory] = true;
-      }
-
-      prepareCategoryNav(lcCategory, category, categoryContainer, mainCategories);
-      prepareCategoryLogContainer(lcCategory, category, logContainer);
-    });
-  });
-  markMainCategoriesWithSubcategories();
-  selectNav(0);
-
-  if(pomodoroCategory != null && pomodoroCategory != "") {
-    filterCategories(pomodoroCategory);
-    selectNav(1);
-  }
-}
-
-function prepareCategoryContainer(categoryName, categoryContainer, logContainer) {
-  let categoryNav = document.getElementById(`category-nav-${categoryName}`);
-  if (!categoryNav) {
-    categoryNav = document.createElement("div");
-    categoryNav.id = `category-nav-${categoryName}`;
-    categoryNav.classList.add("nav-element");
-    categoryNav.setAttribute("data-category-nav", categoryName);
-    categoryNav.innerHTML = categoryName;
-    categoryContainer.appendChild(categoryNav);
-  }
-
-  let categoryLogsContainer = document.getElementById(`category-logs-${categoryName}`);
-  if (!categoryLogsContainer) {
-    categoryLogsContainer = document.createElement("div");
-    categoryLogsContainer.id = `category-logs-${categoryName}`;
-    categoryLogsContainer.classList.add("category-log-container");
-    logContainer.appendChild(categoryLogsContainer);
-  }
-}
-
-function prepareCategoryNav(lcCategory, category, categoryContainer, mainCategories) {
-  let categoryNav = document.getElementById(`category-nav-${lcCategory}`);
-  if (!categoryNav) {
-    categoryNav = document.createElement("div");
-    categoryNav.id = `category-nav-${lcCategory}`;
-    categoryNav.classList.add("nav-element");
-    categoryNav.setAttribute("data-category-nav", lcCategory);
-
-    let isSubcategory = lcCategory.includes(':');
-    let categoryName = category.name;
-
-    categoryNav.innerHTML = categoryName;
-
-    if (isSubcategory) {
-      categoryNav.classList.add("hidden", "subcategory");
-    }
-
-    categoryContainer.appendChild(categoryNav);
-  }
-}
-
-function prepareCategoryLogContainer(lcCategory, category, logContainer) {
-  let categoryLogsContainer = document.getElementById(`category-logs-${lcCategory}`);
-  if (!categoryLogsContainer) {
-    categoryLogsContainer = document.createElement("div");
-    categoryLogsContainer.id = `category-logs-${lcCategory}`;
-    categoryLogsContainer.classList.add("category-log-container");
-    logContainer.appendChild(categoryLogsContainer);
-  }
-
-  let containerHeader = document.getElementById(`${lcCategory}-header`);
-  if (!containerHeader) {
-    containerHeader = document.createElement("h2");
-    containerHeader.id = `${lcCategory}-header`;
-    containerHeader.textContent = `${lcCategory}`;
-    categoryLogsContainer.appendChild(containerHeader);
-  }
-
-  // Check if the category has logs and render them if it does
-  if (category && category.logs && category.logs.length > 0) {
-    renderCategoryLogs(lcCategory, categoryLogsContainer, category.logs);
-  }
-}
-
-function renderCategoryLogs(lcCategory, container, logs) {
-  const sortedLogs = logs.slice().sort((a, b) => {
-    return (a.status === "active" ? -1 : 1) - (b.status === "active" ? -1 : 1);
+function registerElectronListeners() {
+  window.electronAPI.onAppState((payload) => {
+    state.logs = normalizeState(payload);
+    state.theme = payload.theme;
+    applyTheme(state);
+    render();
   });
 
-  sortedLogs.forEach((log) => {
-    if (log.status === "deleted") { return; }
-
-    let logItem = document.getElementById(`${lcCategory}-log-${log.id}`);
-    if (logItem) {
-      logItem.remove();
-    }
-
-    logItem = document.createElement("input");
-    logItem.type = "text";
-    logItem.value = log.content;
-    logItem.id = `${lcCategory}-log-${log.id}`;
-    logItem.classList.add("log-item");
-    logItem.setAttribute("data-category", lcCategory);
-    logItem.setAttribute("data-log-id", log.id);
-    logItem.setAttribute("data-log-status", log.status);
-    if (log.status == "done") {
-      logItem.disabled = true;
-    }
-    container.appendChild(logItem);
-  });
-}
-
-function markMainCategoriesWithSubcategories() {
-  let mainCategoriesWithSub = {};
-
-  categories.forEach(category => {
-    const [main, sub] = category.split(':');
-    if (sub) {
-      mainCategoriesWithSub[main] = true;
-    }
-  });
-
-  for (let mainCategory in mainCategoriesWithSub) {
-    const mainCategoryNav = document.getElementById(`category-nav-${mainCategory}`);
-    if (mainCategoryNav && !mainCategoryNav.classList.contains("has-subcategory")) {
-      mainCategoryNav.innerHTML += " &bull;";
-      mainCategoryNav.classList.add("has-subcategory");
-    }
-  }
-}
-
-function groupAndSortCategories(categories) {
-  let categoryGroups = {};
-  categories.forEach(category => {
-    let mainCategory = category.name.split(':')[0];
-    if (!categoryGroups[mainCategory]) {
-      categoryGroups[mainCategory] = [];
-    }
-    categoryGroups[mainCategory].push(category);
-  });
-
-  Object.values(categoryGroups).forEach(group => {
-    group.sort((a, b) => {
-      return a.name.localeCompare(b.name);
-    });
-  });
-
-  return Object.values(categoryGroups);
-}
-
-function displayError(err, duration) {
-  const errorMessage = document.getElementById("error-message");
-  errorMessage.textContent = err;
-  errorMessage.style.display = "flex";
-  textbox.focus();
-
-  setTimeout(() => { errorMessage.style.display = "none"; }, duration);
-}
-
-function removeCategoryElements(categoryName) {
-  const categoryPattern = new RegExp(
-    `^category-(nav|logs)-${categoryName}(:|$)`
-  );
-  document.querySelectorAll("[id]").forEach((element) => {
-    if (categoryPattern.test(element.id)) {
-      element.remove();
-    }
-  });
-}
-
-function initialiseForm() {
-  const textForm = document.getElementById("text-form");
-  const errorMessage = document.getElementById("error-message");
-
-  let category;
-
-  textForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-
-    const textboxValue = textbox.value.trim();
-
-    const invalidCategoryRegex = /^\/\s/;
-    const isInvalidCategory = invalidCategoryRegex.test(textboxValue);
-
-    if (isInvalidCategory) {
-      displayError("A blank category name? Not allowed I'm afraid.", 4000);
+  window.electronAPI.onEditorCommand((payload) => {
+    if (payload.type === "reset-input") {
+      resetNavigationAndTextbox(state, dom);
+      render();
       return;
-    } else {
-      errorMessage.style.display = "none";
     }
 
-    if (textboxValue.startsWith("delete:")) {
-      let categoryToDelete = textboxValue.substring(7).toLowerCase();
+    if (payload.type === "prepare-show") {
+      resetNavigationAndTextbox(state, dom);
 
-      if (categoryToDelete === "notes") {
-        displayError("You can't delete the notes category!", 4000);
-        return;
+      if (state.pomodoro.category) {
+        dom.textbox.value = `/${state.pomodoro.category} `;
       }
 
-      let categoryExists = categories.some( (cat) => cat.name === categoryToDelete );
-
-      if (categoryExists) {
-        window.electronAPI.deleteCategory(categoryToDelete);
-        removeCategoryElements(categoryToDelete);
-        textbox.value = "delete:";
-      } else {
-        displayError(`Category '${categoryToDelete}' not found.`, 4000);
-      }
-    } else if (textboxValue.startsWith("empty:")) {
-      let categoryToEmpty = textboxValue.substring(6).toLowerCase();
-      let categoryExists = categories.includes(categoryToEmpty);
-      if (categoryExists) {
-        window.electronAPI.emptyCategory(categoryToEmpty);
-        document.getElementById(`category-logs-${categoryToEmpty}`).remove();
-        textbox.value = "empty:";
-      } else {
-        displayError(`Category '${categoryToEmpty}' not found.`, 4000);
-      }
-    } else if (textboxValue.startsWith("pom:")) {
-      let pomAction = textboxValue.substring(4).toLowerCase();
-      const parsedTime = parseInt(pomAction);
-        if (!isNaN(parsedTime) && parsedTime > 0) {
-          pomodoroCategory = "";
-          startPomodoroTimer(parsedTime);
-        } else if (pomAction === "pause") {
-          pausePomodoroTimer();
-        } else if (pomAction === "stop") {
-          stopPomodoroTimer();
-        } else if (pomAction === "resume") {
-          resumePomodoroTimer();
-        } else {
-          displayError('Try "pom:[minutes]", "pom:pause", or "pom:stop".', 4000);
-        }
-    } else if (textboxValue.startsWith("/")) {
-      const splitData = textboxValue.split(" ");
-      category = splitData[0].substring(1);
-      content = splitData.slice(1).join(" ");
-      let categoryExists = categories.includes(category);
-
-      if (content == "/d") {
-        if (!categoryExists) {
-          displayError(`This category doesn't exist.`, 4000);
-          return;
-        }
-        if (!isConfirmationPending) {
-          displayError(`Type /d and enter again to confirm category deletion.`, 8000);
-          isConfirmationPending = true;
-          confirmationTimeout = setTimeout(() => {
-            isConfirmationPending = false;
-          }, 8000);
-        } else {
-          clearTimeout(confirmationTimeout);
-          window.electronAPI.deleteCategory(category);
-          removeCategoryElements(category);
-          clearText();
-          isConfirmationPending = false;
-        }
-      } else if (content == "/e") {
-        if (!categoryExists) {
-          displayError(`This category doesn't exist.`, 4000);
-          return;
-        }
-        if (!isConfirmationPendingForEmpty) {
-          displayError(`Type /e and enter again to confirm category empty.`, 8000);
-          isConfirmationPendingForEmpty = true;
-          confirmationTimeoutForEmpty = setTimeout(() => {
-            isConfirmationPendingForEmpty = false;
-          }, 8000);
-        } else {
-          clearTimeout(confirmationTimeoutForEmpty);
-          window.electronAPI.emptyCategory(category);
-          document.querySelectorAll(`[id^='${category}-log-']`).forEach((element) => { element.remove(); });
-          textbox.value = `/${category} `;
-          isConfirmationPendingForEmpty = false;
-        }
-      } else if (content.startsWith("/m")) {
-        if (!categoryExists) {
-          displayError(`This category doesn't exist.`, 4000);
-          return;
-        }
-        const mRegex = /^\/m(\d+)$/;
-        const match = content.match(mRegex);
-        
-        if (match && match[1]) {
-          const number = parseInt(match[1], 10);
-          window.electronAPI.moveCategory(category, number);
-          window.electronAPI.refreshLogs();
-        } else {
-          displayError("No valid number found after '/m'.", 4000);
-        }
-      } else if (content.startsWith("pom:")) {
-        if (!categoryExists) {
-          displayError(`This category doesn't exist.`, 4000);
-          return;
-        }
-        let pomAction = content.substring(4).toLowerCase();
-        const parsedTime = parseInt(pomAction);
-      
-        if (!isNaN(parsedTime) && parsedTime > 0) {
-          pomodoroCategory = category;
-          startPomodoroTimer(parsedTime);
-        } else if (pomAction === "pause") {
-          pausePomodoroTimer();
-        } else if (pomAction === "stop") {
-          stopPomodoroTimer();
-        } else if (pomAction === "resume") {
-          resumePomodoroTimer();
-        } else {
-          displayError('Try "pom:[minutes]", "pom:pause", or "pom:stop".', 4000);
-        }
-      } else {
-        window.electronAPI.sendText(textboxValue);
-        setTimeout(() => {
-          textbox.value = `/${category} `;
-          filterCategories(category);
-          selectNav(1);
-        }, 50);
-      }
-    } else {
-      window.electronAPI.sendText(textboxValue);
-      textbox.value = ``;
-    }
-    setTimeout(() => { selectNav(0); }, 5);
-  });
-
-  textbox.addEventListener("input", function () {
-    const inputValue = this.value.trim();
-    const dRegex = /^\/[\w.-]+(:[\w.-]+)?\s*\/d$/;
-    const eRegex = /^\/[\w.-]+(:[\w.-]+)?\s*\/e$/;
-    const mRegex = /^\/[\w.-]+(:[\w.-]+)?\s*\/m\d+$/;
-
-    if (inputValue.startsWith("/")) {
-      const partialCategory = inputValue.substring(1).split(" ")[0];
-      filterCategories(partialCategory);
-    }
-
-    if (
-      inputValue.startsWith("delete:") ||
-      inputValue.startsWith("empty:") ||
-      dRegex.test(inputValue) ||
-      eRegex.test(inputValue)
-    ) {
-      textbox.style.color = "tomato";
-    } else if (mRegex.test(inputValue)) {
-      textbox.style.color = "slateblue";
-    } else {
-      textbox.style.color = "var(--text-color)";
-    }
-
-    if (this.value.trim() === "") {
-      hideSubcategories();
+      render();
+      focusTextbox(state, dom);
     }
   });
 }
 
-function startPomodoroTimer(durationInMinutes) {
-  if (pomodoroTimerId) {
-    clearInterval(pomodoroTimerId);
-  }
-  timeLeftInSeconds = durationInMinutes * 60;
-  isTimerPaused = false;
-  document.getElementById("timer-display").style.display = 'block';
+function registerDomListeners() {
+  dom.textForm.addEventListener("submit", handleSubmit);
+  dom.textbox.addEventListener("input", handleTextboxInput);
 
-  updateTimerDisplay();
-
-  pomodoroTimerId = setInterval(updateTimerDisplay, 1000);
-  window.electronAPI.requestHide();
-}
-
-function pausePomodoroTimer() {
-  if (pomodoroTimerId) {
-    clearInterval(pomodoroTimerId);
-    pomodoroTimerId = null;
-    isTimerPaused = true;
-  }
-  window.electronAPI.requestHide();
-}
-
-function resumePomodoroTimer() {
-  if (!pomodoroTimerId && isTimerPaused) {
-    isTimerPaused = false;
-    pomodoroTimerId = setInterval(updateTimerDisplay, 1000);
-  }
-  window.electronAPI.requestHide();
-}
-
-function stopPomodoroTimer() {
-  if (pomodoroTimerId) {
-    clearInterval(pomodoroTimerId);
-  }
-  pomodoroCategory = "";
-  pomodoroTimerId = null;
-  isTimerPaused = false;
-  timeLeftInSeconds = 0;
-  document.getElementById("timer-display").style.display = null;
-  window.electronAPI.requestHide();
-}
-
-function updateTimerDisplay() {
-  const display = document.getElementById("timer-display");
-  if (timeLeftInSeconds <= 0) {
-    clearInterval(pomodoroTimerId);
-    playChime();
-    pomodoroTimerId = null;
-    display.textContent = "";
-    display.style.display = null;
-  } else if (!isTimerPaused) {
-    const minutes = Math.floor(timeLeftInSeconds / 60);
-    const seconds = timeLeftInSeconds % 60;
-    if (pomodoroCategory != null && pomodoroCategory != "") {
-      display.textContent = `/${pomodoroCategory} ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    } else {
-        display.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    }
-    timeLeftInSeconds--;
-  }
-}
-
-function playChime() {
-  const chime = new Audio('assets/chime.mp3');
-  chime.play();
-  pomodoroCategory = null;
-}
-
-function filterCategories(partialCategory) {
-  const navElements = document.getElementsByClassName("nav-element");
-  const searchPattern = `category-nav-${partialCategory.toLowerCase()}`;
-
-  Array.from(navElements).forEach((nav) => {
-    const isSubcategory = nav.classList.contains("subcategory");
-    const idMatches = nav.id.toLowerCase().includes(searchPattern);
-
-    if (isSubcategory && !partialCategory.includes(":")) {
-      nav.classList.add("hidden");
-    } else if (idMatches) {
-      nav.classList.remove("hidden");
-    } else {
-      nav.classList.add("hidden");
-      currentCategory = null;
-    }
+  window.addEventListener("keydown", handleKeyDown);
+  window.addEventListener("keyup", (event) => {
+    delete state.keysPressed[event.key];
   });
 }
 
-function showAllCategories() {
-  const navElements = document.querySelectorAll('.nav-element.hidden');
-  navElements.forEach((nav) => {
-    nav.classList.remove('hidden');
+function normalizeState(payload) {
+  if (!payload.logs || !Array.isArray(payload.logs.categories)) {
+    return { categories: [] };
+  }
+
+  return {
+    categories: payload.logs.categories.map((category) => ({
+      ...category,
+      logs: Array.isArray(category.logs) ? category.logs : [],
+    })),
+  };
+}
+
+function render() {
+  renderApp(state, dom, {
+    onCategorySelected(index) {
+      state.currentCategoryIndex = index;
+      state.currentSelectedLogId = null;
+      syncTextboxToSelection(state, dom);
+      render();
+      focusTextbox(state, dom);
+    },
+    onLogFocused(logId) {
+      state.currentSelectedLogId = logId;
+    },
+    onLogEdited(content, category, id) {
+      queueLogEdit(content, category, id);
+    },
   });
-  selectNav(-currentCategory);
+  updateTimerDisplay(state, dom);
 }
 
-function selectNav(direction) {
-  if(currentCategory == null) {
-    direction = 0;
-  }
-  const navElements = Array.from(document.querySelectorAll(".nav-element:not(.hidden)"));
-  const logContainers = Array.from(document.querySelectorAll(".category-log-container"));
-  textbox.style.color = "var(--text-color)";
-  unselectAllLogs();
-
-  currentCategory = (currentCategory ?? 0) + direction;
-  if (currentCategory < 0 || currentCategory >= navElements.length) return;
-
-  resetNavElementsStyle(navElements);
-
-  const selectedNavElement = navElements[currentCategory];
-  if (selectedNavElement) {
-    highlightSelectedNavElement(selectedNavElement);
-
-    const categoryName = selectedNavElement.getAttribute("data-category-nav");
-    updateLogContainersVisibility(categoryName, logContainers);
-
-    updateTextboxForCategory(categoryName);
-  } else {
-    setTimeout(() => selectNav(0), 20);
-  }
-  focusText();
-}
-
-function resetNavElementsStyle(navElements) {
-  navElements.forEach((div) => {
-    div.style.backgroundColor = "";
-    div.style.color = "";
-  });
-}
-
-function highlightSelectedNavElement(navElement) {
-  navElement.style.backgroundColor = "var(--theme-color)";
-  navElement.style.color = "white";
-  navElement.scrollIntoView({ behavior: "smooth", block: "nearest" });
-}
-
-function updateLogContainersVisibility(categoryName, logContainers) {
-  logContainers.forEach((div) => div.classList.add("hidden"));
-  document.getElementById(`category-logs-${categoryName}`).classList.remove("hidden");
-}
-
-function updateTextboxForCategory(categoryName) {
-  textbox.value = categoryName !== "notes" ? `/${categoryName} ` : "";
-  if (categoryName !== "notes") {
-    setTimeout(() => { textbox.selectionStart = textbox.selectionEnd = textbox.value.length; }, 3);
-  }
-}
-
-function scrollToTopOfLog() {
-  const logContainer = document.getElementById("log-container");
-  logContainer.scrollTo(0, 0);
-}
-
-function selectLog(down) {
-  let logs = document.querySelectorAll(
-    `.category-log-container:not(.hidden) input`
-  );
-  if (logs.length === 0) {
-    return;
+function queueLogEdit(content, category, id) {
+  if (state.debounceTimer) {
+    clearTimeout(state.debounceTimer);
   }
 
-  textbox.blur();
-
-  selectedIndex = currentSelectedLog ? Array.from(logs).indexOf(currentSelectedLog) : -1;
-  selectedIndex += down ? 1 : -1;
-
-  if (selectedIndex < 0) {
-    if (currentSelectedLog) {
-      currentSelectedLog.classList.remove("selected");
-      currentSelectedLog = null;
-    }
-    if (logs.length > 0) {
-      logs[0].scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-      });
-    }
-    textbox.focus();
-    setTimeout(() => { textbox.selectionStart = textbox.selectionEnd = textbox.value.length; }, 10);
-    return;
-  } else if (selectedIndex >= logs.length) {
-    return;
-  }
-
-  if (currentSelectedLog) {
-    currentSelectedLog.removeEventListener("input", editLogHandler);
-    currentSelectedLog.classList.remove("selected");
-    currentSelectedLog.blur();
-  }
-  currentSelectedLog = logs[selectedIndex];
-  currentSelectedLog.classList.add("selected");
-  currentSelectedLog.addEventListener("input", editLogHandler);
-  currentSelectedLog.focus();
-  setTimeout(() => { currentSelectedLog.selectionStart = currentSelectedLog.selectionEnd = currentSelectedLog.value.length; }, 10);
-
-  currentSelectedLog.scrollIntoView({
-    behavior: "instant",
-    block: "nearest",
-  });
-
-  setTimeout(() => {
-    const scrollableContainer = currentSelectedLog.parentElement;
-    const buffer = 20;
-
-    if (scrollableContainer.scrollLeft > currentSelectedLog.offsetLeft) {
-      scrollableContainer.scrollLeft = currentSelectedLog.offsetLeft - buffer;
-    } else {
-      const rightEdge = currentSelectedLog.offsetLeft + currentSelectedLog.offsetWidth;
-      const scrollRightEdge = scrollableContainer.scrollLeft + scrollableContainer.offsetWidth;
-
-      if (rightEdge > scrollRightEdge) {
-        scrollableContainer.scrollLeft = rightEdge - scrollableContainer.offsetWidth + buffer;
-      }
-    }
-  }, 20);
-}
-
-function selectBoundingLog(top) {
-  let logs = document.querySelectorAll(`.category-log-container:not(.hidden) input`);
-  if (logs.length === 0) {
-    return;
-  }
-
-  textbox.blur();
-
-  if (currentSelectedLog) {
-    currentSelectedLog.removeEventListener("input", editLogHandler);
-    currentSelectedLog.classList.remove("selected");
-    currentSelectedLog.blur();
-  }
-
-  if (top) {
-    selectedIndex = 0;
-  } else {
-    selectedIndex = logs.length - 1;
-  }
-  currentSelectedLog = logs[selectedIndex];
-  currentSelectedLog.classList.add("selected");
-  currentSelectedLog.addEventListener("input", editLogHandler);
-  currentSelectedLog.focus();
-  setTimeout(() => {
-    currentSelectedLog.selectionStart = currentSelectedLog.selectionEnd = currentSelectedLog.value.length;
-  }, 10);
-
-  currentSelectedLog.scrollIntoView({
-    behavior: "instant",
-    block: "nearest",
-  });
-
-  setTimeout(() => {
-    const scrollableContainer = currentSelectedLog.parentElement;
-    const buffer = 20;
-
-    if (scrollableContainer.scrollLeft > currentSelectedLog.offsetLeft) {
-      scrollableContainer.scrollLeft = currentSelectedLog.offsetLeft - buffer;
-    } else {
-      const rightEdge = currentSelectedLog.offsetLeft + currentSelectedLog.offsetWidth;
-      const scrollRightEdge = scrollableContainer.scrollLeft + scrollableContainer.offsetWidth;
-
-      if (rightEdge > scrollRightEdge) {
-        scrollableContainer.scrollLeft = rightEdge - scrollableContainer.offsetWidth + buffer;
-      }
-    }
-  }, 20);
-}
-
-function editLogHandler() {
-  const content = this.value;
-  const category = this.getAttribute("data-category");
-  const id = this.getAttribute("data-log-id");
-
-  if (debounceTimer) clearTimeout(debounceTimer);
-
-  debounceTimer = setTimeout(() => {
-    editLog(content, category, id);
+  state.debounceTimer = setTimeout(() => {
+    window.electronAPI.editLog([{ content, category, id: String(id) }]);
   }, 500);
 }
 
-function editLog(content, category, id) {
-  let logData = [];
-  logData.push({ content, category, id });
-  window.electronAPI.editLog(logData);
-}
-
-function unselectAllLogs() {
-  currentSelectedLog = null;
-  let selectedLogs = document.querySelectorAll(".log-item.selected");
-  selectedLogs.forEach((log) => { log.classList.remove("selected"); });
-}
-
-function deleteLog() {
-  let selectedLogs = document.querySelectorAll(".log-item.selected");
-  let logData = [];
-
-  selectedLogs.forEach((log) => {
-    let logCategory = log.getAttribute("data-category");
-    let logId = log.getAttribute("data-log-id");
-    logData.push({ logCategory, logId });
-    let logs = document.querySelectorAll(`.log-item[data-category="${logCategory}"]`);
-    if (selectedIndex + 1 === logs.length) {
-      selectLog(false);
-    } else {
-      selectLog(true);
-      selectedIndex--;
-    }
-
-    log.remove();
-  });
-
-  window.electronAPI.deleteLog(logData);
-}
-
-function markDone() {
-  const selectedLog = document.querySelector(".log-item.selected");
-  if (!selectedLog) return;
-
-  const logCategory = selectedLog.getAttribute("data-category");
-  const logId = parseInt(selectedLog.getAttribute("data-log-id"));
-  const logStatus = selectedLog.getAttribute("data-log-status");
-  const logData = [{ logCategory, logId }];
-
-  selectedLog.setAttribute("data-log-status", logStatus === "active" ? "done" : "active");
-  selectedLog.disabled = logStatus === "active";
-
-  const shouldMoveSelection = shouldSelectNextLog(logCategory, logId, logStatus);
-  if (shouldMoveSelection) {
-    selectLog(logStatus === "active");
+function handleTextboxInput() {
+  if (dom.textbox.value.trim() === "") {
+    state.currentCategoryIndex = 0;
   }
 
-  reorderLogsInCategory(logCategory);
-  focusOnSelectedLog();
-  window.electronAPI.markDone(logData);
+  render();
 }
 
-function shouldSelectNextLog(logCategory, logId, currentStatus) {
-  const logs = Array.from(document.querySelectorAll(`.log-item[data-category="${logCategory}"]`));
-  const currentIndex = logs.findIndex((log) => parseInt(log.getAttribute("data-log-id")) === logId);
+function handleSubmit(event) {
+  event.preventDefault();
 
-  if (currentStatus === "active") {
-    return (
-      currentIndex < logs.length - 1 ||
-      logs[currentIndex + 1]?.getAttribute("data-log-status") === "done"
-    );
-  } else {
-    return (
-      currentIndex > 0 ||
-      logs[currentIndex - 1]?.getAttribute("data-log-status") === "active"
-    );
-  }
-}
-
-function focusOnSelectedLog() {
-  const postActionLog = document.querySelector(".log-item.selected");
-  if (!postActionLog) return;
-
-  setTimeout(() => {
-    postActionLog.focus();
-    postActionLog.selectionStart = postActionLog.selectionEnd = postActionLog.value.length;
-  }, 10);
-}
-
-function reorderLogsInCategory(category) {
-  let categoryContainer = document.getElementById(`category-logs-${category}`);
-
-  if (!categoryContainer) {
-    console.error("Category container not found for", category);
+  const textboxValue = dom.textbox.value.trim();
+  if (!textboxValue) {
     return;
   }
 
-  let logItems = categoryContainer.querySelectorAll(".log-item");
-  let logsArray = Array.from(logItems);
+  if (/^\/\s/.test(textboxValue)) {
+    showError("A blank category name? Not allowed I'm afraid.", 4000);
+    return;
+  }
 
-  logsArray.sort((a, b) => {
-    let statusA = a.getAttribute("data-log-status");
-    let statusB = b.getAttribute("data-log-status");
-    let idA = parseInt(a.getAttribute("data-log-id"));
-    let idB = parseInt(b.getAttribute("data-log-id"));
+  if (textboxValue.startsWith("delete:")) {
+    submitCategoryDelete(textboxValue.substring(7).toLowerCase());
+    return;
+  }
 
-    if (statusA === statusB) {
-      return idA - idB;
-    } else {
-      return statusA === "active" ? -1 : 1;
-    }
-  });
+  if (textboxValue.startsWith("empty:")) {
+    submitCategoryEmpty(textboxValue.substring(6).toLowerCase());
+    return;
+  }
 
-  logsArray.forEach((log) => categoryContainer.appendChild(log));
+  if (textboxValue.startsWith("pom:")) {
+    handlePomodoroCommand(textboxValue.substring(4).toLowerCase(), "");
+    return;
+  }
+
+  if (textboxValue.startsWith("/")) {
+    submitCategoryCommand(textboxValue);
+    return;
+  }
+
+  window.electronAPI.sendText(textboxValue);
+  dom.textbox.value = "";
+  state.currentSelectedLogId = null;
 }
 
-function hideSubcategories() {
-  subcategories = document.querySelectorAll(".subcategory");
-  subcategories.forEach((subCat) => { subCat.classList.add("hidden"); });
+function submitCategoryDelete(categoryName) {
+  if (categoryName === "notes") {
+    showError("You can't delete the notes category!", 4000);
+    return;
+  }
+
+  if (!categoryExists(state, categoryName)) {
+    showError(`Category '${categoryName}' not found.`, 4000);
+    return;
+  }
+
+  window.electronAPI.deleteCategory(categoryName);
+  dom.textbox.value = "delete:";
+}
+
+function submitCategoryEmpty(categoryName) {
+  if (!categoryExists(state, categoryName)) {
+    showError(`Category '${categoryName}' not found.`, 4000);
+    return;
+  }
+
+  window.electronAPI.emptyCategory(categoryName);
+  dom.textbox.value = "empty:";
+}
+
+function submitCategoryCommand(textboxValue) {
+  const splitData = textboxValue.split(" ");
+  const category = splitData[0].substring(1).toLowerCase();
+  const content = splitData.slice(1).join(" ");
+
+  if (content === "/d") {
+    confirmCategoryDelete(category);
+    return;
+  }
+
+  if (content === "/e") {
+    confirmCategoryEmpty(category);
+    return;
+  }
+
+  if (content.startsWith("/m")) {
+    moveCategory(category, content);
+    return;
+  }
+
+  if (content.startsWith("pom:")) {
+    handlePomodoroCommand(content.substring(4).toLowerCase(), category);
+    return;
+  }
+
+  window.electronAPI.sendText(textboxValue);
+  dom.textbox.value = category ? `/${category} ` : "";
+  state.currentSelectedLogId = null;
+}
+
+function confirmCategoryDelete(category) {
+  if (!categoryExists(state, category)) {
+    showError("This category doesn't exist.", 4000);
+    return;
+  }
+
+  if (!state.confirmation.deletePending) {
+    showError("Type /d and enter again to confirm category deletion.", 8000);
+    state.confirmation.deletePending = true;
+    state.confirmation.deleteTimeoutId = setTimeout(() => {
+      state.confirmation.deletePending = false;
+    }, 8000);
+    return;
+  }
+
+  clearTimeout(state.confirmation.deleteTimeoutId);
+  state.confirmation.deletePending = false;
+  window.electronAPI.deleteCategory(category);
+  resetNavigationAndTextbox(state, dom);
+  render();
+}
+
+function confirmCategoryEmpty(category) {
+  if (!categoryExists(state, category)) {
+    showError("This category doesn't exist.", 4000);
+    return;
+  }
+
+  if (!state.confirmation.emptyPending) {
+    showError("Type /e and enter again to confirm category empty.", 8000);
+    state.confirmation.emptyPending = true;
+    state.confirmation.emptyTimeoutId = setTimeout(() => {
+      state.confirmation.emptyPending = false;
+    }, 8000);
+    return;
+  }
+
+  clearTimeout(state.confirmation.emptyTimeoutId);
+  state.confirmation.emptyPending = false;
+  window.electronAPI.emptyCategory(category);
+  dom.textbox.value = `/${category} `;
+}
+
+function moveCategory(category, command) {
+  if (!categoryExists(state, category)) {
+    showError("This category doesn't exist.", 4000);
+    return;
+  }
+
+  const match = command.match(/^\/m(\d+)$/);
+
+  if (!match) {
+    showError("No valid number found after '/m'.", 4000);
+    return;
+  }
+
+  window.electronAPI.moveCategory(category, parseInt(match[1], 10));
+}
+
+function showError(message, duration) {
+  displayError(dom, message, duration, () => focusTextbox(state, dom));
+}
+
+function handleKeyDown(event) {
+  state.keysPressed[event.key] = true;
+
+  handleArrowNavigation(event);
+  handleTabNavigation(event);
+  handleTextboxShortcuts(event);
+  handleLogSelection(event);
+}
+
+function handleArrowNavigation(event) {
+  if (state.currentSelectedLogId != null) {
+    return;
+  }
+
+  if (event.key === "ArrowRight" && !state.keysPressed.Shift) {
+    selectNav(1);
+  } else if (event.key === "ArrowLeft" && !state.keysPressed.Shift) {
+    selectNav(-1);
+  } else if (event.key === "Enter" && /^\/[\w.-]+ $/.test(dom.textbox.value)) {
+    resetNavigationAndTextbox(state, dom);
+    render();
+  }
+}
+
+function handleTabNavigation(event) {
+  if (event.key !== "Tab") {
+    return;
+  }
+
+  event.preventDefault();
+  focusTextbox(state, dom);
+  selectNav(state.keysPressed.Shift ? -1 : 1);
+}
+
+function handleTextboxShortcuts(event) {
+  if (document.activeElement !== dom.textbox) {
+    return;
+  }
+
+  if (event.key === "Backspace") {
+    if (dom.textbox.value === "delete:" || dom.textbox.value === "empty:") {
+      resetNavigationAndTextbox(state, dom);
+      render();
+      return;
+    }
+
+    if (/^\/[\w.-]+:[^ ]+ $/.test(dom.textbox.value) || /^\/[\w.-]+:$/.test(dom.textbox.value)) {
+      dom.textbox.value = `${dom.textbox.value.substring(0, dom.textbox.value.lastIndexOf(":"))} `;
+      render();
+      return;
+    }
+
+    if (/^\/[\w.-]+:([^ ]+)? $/.test(dom.textbox.value) || /^\/[\w.-]+ $/.test(dom.textbox.value)) {
+      resetNavigationAndTextbox(state, dom);
+      render();
+      return;
+    }
+  }
+
+  if (event.key === ":" && /^\/[\w.-]+ $/.test(dom.textbox.value)) {
+    dom.textbox.value = dom.textbox.value.replace(" ", "");
+  }
+
+  if (event.key === " ") {
+    const match = /^\/([\w.-]+)(?::([\w.-]+))?$/.exec(dom.textbox.value);
+
+    if (!match) {
+      return;
+    }
+
+    const potentialCategory = match[1] + (match[2] ? `:${match[2]}` : "");
+
+    if (categoryExists(state, potentialCategory.toLowerCase())) {
+      event.preventDefault();
+      render();
+    }
+  }
+}
+
+function selectNav(direction) {
+  if (state.visibleCategories.length === 0) {
+    return;
+  }
+
+  state.currentSelectedLogId = null;
+  state.currentCategoryIndex = Math.max(
+    0,
+    Math.min(state.currentCategoryIndex + direction, state.visibleCategories.length - 1)
+  );
+  syncTextboxToSelection(state, dom);
+  render();
+  focusTextbox(state, dom);
+}
+
+function handleLogSelection(event) {
+  if (window.innerHeight <= 200) {
+    return;
+  }
+
+  if (event.key === "ArrowDown" && !state.keysPressed.Shift) {
+    selectLog(true);
+    return;
+  }
+
+  if (event.key === "ArrowUp" && !state.keysPressed.Shift) {
+    selectLog(false);
+    return;
+  }
+
+  if (state.keysPressed.Shift && event.key === "ArrowUp") {
+    focusTextbox(state, dom);
+    render();
+    return;
+  }
+
+  if (state.keysPressed.Shift && event.key === "ArrowDown") {
+    selectBoundingLog(false);
+    return;
+  }
+
+  if (state.keysPressed.Shift && event.key === "Enter" && state.currentSelectedLogId != null) {
+    markDone();
+    return;
+  }
+
+  if (state.keysPressed.Shift && event.key === "Delete" && state.currentSelectedLogId != null) {
+    deleteSelectedLog();
+  }
+}
+
+function getCurrentRenderedLogs() {
+  return Array.from(dom.logContainer.querySelectorAll(".log-item"));
+}
+
+function selectLog(down) {
+  const logs = getCurrentRenderedLogs();
+
+  if (logs.length === 0) {
+    return;
+  }
+
+  const currentIndex = logs.findIndex((log) => Number(log.dataset.logId) === state.currentSelectedLogId);
+  const nextIndex = currentIndex + (down ? 1 : -1);
+
+  if (nextIndex < 0) {
+    state.currentSelectedLogId = null;
+    render();
+    focusTextbox(state, dom);
+    return;
+  }
+
+  if (nextIndex >= logs.length) {
+    return;
+  }
+
+  state.currentSelectedLogId = Number(logs[nextIndex].dataset.logId);
+  render();
+}
+
+function selectBoundingLog(top) {
+  const logs = getCurrentRenderedLogs();
+
+  if (logs.length === 0) {
+    return;
+  }
+
+  state.currentSelectedLogId = Number(logs[top ? 0 : logs.length - 1].dataset.logId);
+  render();
+}
+
+function deleteSelectedLog() {
+  const selectedCategory = getSelectedCategory(state);
+
+  if (!selectedCategory || state.currentSelectedLogId == null) {
+    return;
+  }
+
+  window.electronAPI.deleteLog([
+    {
+      logCategory: selectedCategory.name,
+      logId: String(state.currentSelectedLogId),
+    },
+  ]);
+
+  state.currentSelectedLogId = null;
+}
+
+function markDone() {
+  const selectedCategory = getSelectedCategory(state);
+
+  if (!selectedCategory || state.currentSelectedLogId == null) {
+    return;
+  }
+
+  window.electronAPI.markDone([
+    {
+      logCategory: selectedCategory.name,
+      logId: state.currentSelectedLogId,
+    },
+  ]);
+}
+
+function handlePomodoroCommand(action, category) {
+  const parsedTime = parseInt(action, 10);
+
+  if (!Number.isNaN(parsedTime) && parsedTime > 0) {
+    state.pomodoro.category = category || null;
+    beginPomodoroTimer(parsedTime);
+    window.electronAPI.requestHide();
+    return;
+  }
+
+  if (action === "pause") {
+    pausePomodoroTimer(state);
+    window.electronAPI.requestHide();
+    return;
+  }
+
+  if (action === "resume") {
+    resumePomodoroTimer(state, dom, () => {});
+    window.electronAPI.requestHide();
+    return;
+  }
+
+  if (action === "stop") {
+    stopPomodoroTimer(state, dom);
+    window.electronAPI.requestHide();
+    return;
+  }
+
+  showError('Try "pom:[minutes]", "pom:pause", or "pom:stop".', 4000);
 }

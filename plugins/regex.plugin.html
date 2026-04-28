@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Regex Plugin</title>
+    <style>
+      :root { --theme-color: tomato; --bg: #ece8e2; --panel: rgba(255,255,255,.78); --text: #181818; --muted: rgba(0,0,0,.66); }
+      html[data-theme="dark"] { --bg: #111111; --panel: rgba(255,255,255,.06); --text: #f3f3f3; --muted: rgba(255,255,255,.7); }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: linear-gradient(145deg, color-mix(in srgb, var(--theme-color) 15%, var(--bg)) 0%, var(--bg) 74%); color: var(--text); font-family: Consolas, "Segoe UI", monospace; }
+      #main { display: grid; grid-template-rows: auto auto 1fr auto; gap: 14px; width: 100%; height: 100%; padding: 18px; box-sizing: border-box; }
+      #badge { width: fit-content; padding: 6px 10px; background: var(--theme-color); color: white; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; font-family: "Segoe UI", sans-serif; }
+      #summary { font-size: 14px; color: var(--muted); font-family: "Segoe UI", sans-serif; }
+      #matches { min-height: 0; overflow: auto; padding: 14px; background: var(--panel); backdrop-filter: blur(10px); white-space: pre-wrap; line-height: 1.45; }
+      #help { padding: 12px 14px; background: rgba(0,0,0,.08); font-size: 14px; font-family: "Segoe UI", sans-serif; }
+      #matches::-webkit-scrollbar { width: 8px; }
+      #matches::-webkit-scrollbar-track { background: transparent; }
+      #matches::-webkit-scrollbar-thumb { background: rgba(0,0,0,.18); border-radius: 999px; }
+    </style>
+    <script id="captainslog-plugin" type="application/json">
+      { "id": "regex", "name": "Regex", "command": "regex", "aliases": ["rx", "re"], "version": "1.0.0", "description": "Test regex patterns against text.", "capabilities": [], "defaultSize": "big" }
+    </script>
+  </head>
+  <body>
+    <div id="main">
+      <div id="badge">Regex</div>
+      <div id="summary">Use /pattern/flags :: sample text</div>
+      <section id="matches">No matches yet.</section>
+      <div id="help">Example: /cat/gi :: The Cat scattered a catalog of cats.</div>
+    </div>
+    <script>
+      const dom = {
+        summary: document.getElementById("summary"),
+        matches: document.getElementById("matches"),
+      };
+
+      window.addEventListener("message", (event) => {
+        const message = event.data;
+        if (!message || typeof message !== "object") return;
+        if (message.type === "captainslog:state") {
+          document.documentElement.style.setProperty("--theme-color", message.payload.theme.accentColor);
+          document.documentElement.setAttribute("data-theme", message.payload.theme.themeColor);
+          return;
+        }
+        if (message.type === "captainslog:plugin-context") {
+          renderRegex(message.payload.args || "");
+        }
+      });
+
+      window.parent.postMessage({ type: "captainslog:plugin-ready" }, "*");
+
+      function renderRegex(input) {
+        const trimmed = input.trim();
+        if (!trimmed) {
+          dom.summary.textContent = "Use /pattern/flags :: sample text";
+          dom.matches.textContent = "No matches yet.";
+          return;
+        }
+
+        const separatorIndex = trimmed.indexOf("::");
+        if (separatorIndex === -1) {
+          dom.summary.textContent = "Missing separator";
+          dom.matches.textContent = "Expected format: /pattern/flags :: sample text";
+          return;
+        }
+
+        const expression = trimmed.slice(0, separatorIndex).trim();
+        const sample = trimmed.slice(separatorIndex + 2).trim();
+        const parsed = parseExpression(expression);
+
+        if (!parsed) {
+          dom.summary.textContent = "Invalid regex";
+          dom.matches.textContent = "Pattern must look like /.../flags";
+          return;
+        }
+
+        try {
+          const regex = new RegExp(parsed.source, parsed.flags.includes("g") ? parsed.flags : `${parsed.flags}g`);
+          const matches = Array.from(sample.matchAll(regex));
+          dom.summary.textContent = `${matches.length} match${matches.length === 1 ? "" : "es"}`;
+
+          if (matches.length === 0) {
+            dom.matches.textContent = "No matches.";
+            return;
+          }
+
+          dom.matches.textContent = matches
+            .map((match, index) => `${index + 1}. "${match[0]}" at ${match.index}`)
+            .join("\n");
+        } catch (error) {
+          dom.summary.textContent = "Regex error";
+          dom.matches.textContent = error.message;
+        }
+      }
+
+      function parseExpression(expression) {
+        const match = expression.match(/^\/([\s\S]*)\/([dgimsuvy]*)$/);
+        if (!match) {
+          return null;
+        }
+        return { source: match[1], flags: match[2] };
+      }
+    </script>
+  </body>
+</html>

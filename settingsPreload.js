@@ -5,4 +5,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openExplorer: (path) => ipcRenderer.send('open-explorer', path),
     sendColor: (colorId) => ipcRenderer.send('commit-color-to-config', colorId),
     sendTheme: (themeId) => ipcRenderer.send('commit-theme-to-config', themeId),
+    requestData: () => ipcRenderer.send('request-settings-data'),
+    onData: (callback) => ipcRenderer.on('settings-data', (_event, payload) => callback(payload)),
 });

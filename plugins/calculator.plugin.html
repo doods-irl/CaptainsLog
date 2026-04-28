@@ -1,0 +1,68 @@
+﻿<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calculator Plugin</title>
+    <style>
+      :root { --theme-color: tomato; --bg: #f4f1e8; --panel: rgba(255,255,255,.76); --text: #151515; }
+      html[data-theme="dark"] { --bg: #101010; --panel: rgba(255,255,255,.06); --text: #f2f2f2; }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: linear-gradient(135deg, color-mix(in srgb, var(--theme-color) 16%, var(--bg)) 0%, var(--bg) 70%); color: var(--text); font-family: Segoe UI, sans-serif; }
+      #main { display: grid; grid-template-rows: auto 1fr auto; width: 100%; height: 100%; padding: 18px; box-sizing: border-box; gap: 14px; }
+      #badge { width: fit-content; padding: 6px 10px; background: var(--theme-color); color: white; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+      #answer { display: grid; align-content: center; justify-items: center; background: var(--panel); backdrop-filter: blur(10px); min-height: 0; font-size: clamp(34px, 10vw, 96px); font-weight: 800; }
+      #detail { padding: 12px 14px; background: rgba(0,0,0,.08); font-size: 14px; }
+    </style>
+    <script id="captainslog-plugin" type="application/json">
+      { "id": "calculator", "name": "Calculator", "command": "calculator", "aliases": ["calc"], "version": "1.0.0", "description": "Evaluate simple math expressions in the answer plane.", "capabilities": [], "defaultSize": "big" }
+    </script>
+  </head>
+  <body>
+    <div id="main">
+      <div id="badge">Calculator</div>
+      <div id="answer">0</div>
+      <div id="detail">Type an expression after -calculator or -calc.</div>
+    </div>
+    <script>
+      const dom = { answer: document.getElementById("answer"), detail: document.getElementById("detail") };
+
+      window.addEventListener("message", (event) => {
+        const message = event.data;
+        if (!message || typeof message !== "object") return;
+        if (message.type === "captainslog:state") {
+          document.documentElement.style.setProperty("--theme-color", message.payload.theme.accentColor);
+          document.documentElement.setAttribute("data-theme", message.payload.theme.themeColor);
+          return;
+        }
+        if (message.type === "captainslog:plugin-context") {
+          renderExpression(message.payload.args || "");
+        }
+      });
+
+      window.parent.postMessage({ type: "captainslog:plugin-ready" }, "*");
+
+      function renderExpression(expression) {
+        const trimmed = expression.trim();
+        if (!trimmed) {
+          dom.answer.textContent = "0";
+          dom.detail.textContent = "Type an expression after -calculator or -calc.";
+          return;
+        }
+        if (!/^[0-9+\-*/().% ]+$/.test(trimmed)) {
+          dom.answer.textContent = "?";
+          dom.detail.textContent = "Only numbers and basic math operators are supported.";
+          return;
+        }
+        try {
+          const result = Function(`\"use strict\"; return (${trimmed});`)();
+          if (typeof result !== "number" || Number.isNaN(result) || !Number.isFinite(result)) throw new Error("invalid result");
+          dom.answer.textContent = String(result);
+          dom.detail.textContent = trimmed;
+        } catch {
+          dom.answer.textContent = "?";
+          dom.detail.textContent = "Expression could not be evaluated.";
+        }
+      }
+    </script>
+  </body>
+</html>

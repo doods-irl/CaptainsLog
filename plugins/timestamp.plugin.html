@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timestamp Plugin</title>
+    <style>
+      :root { --theme-color: tomato; --bg: #ebe8ee; --panel: rgba(255,255,255,.78); --text: #181818; --muted: rgba(0,0,0,.68); }
+      html[data-theme="dark"] { --bg: #111215; --panel: rgba(255,255,255,.06); --text: #f3f3f3; --muted: rgba(255,255,255,.72); }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: linear-gradient(160deg, color-mix(in srgb, var(--theme-color) 13%, var(--bg)) 0%, var(--bg) 72%); color: var(--text); font-family: Segoe UI, sans-serif; }
+      #main { display: grid; grid-template-rows: auto auto 1fr auto; gap: 14px; width: 100%; height: 100%; padding: 18px; box-sizing: border-box; }
+      #badge { width: fit-content; padding: 6px 10px; background: var(--theme-color); color: white; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+      #input-label { color: var(--muted); font-size: 14px; }
+      #cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; min-height: 0; }
+      .card { display: grid; align-content: start; gap: 8px; padding: 14px; background: var(--panel); backdrop-filter: blur(10px); }
+      .card h2 { margin: 0; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+      .value { font-size: clamp(18px, 3vw, 28px); font-weight: 800; word-break: break-word; }
+      #help { padding: 12px 14px; background: rgba(0,0,0,.08); font-size: 14px; }
+    </style>
+    <script id="captainslog-plugin" type="application/json">
+      { "id": "timestamp", "name": "Timestamp", "command": "timestamp", "aliases": ["time", "ts"], "version": "1.0.0", "description": "Convert dates, unix timestamps, and relative offsets.", "capabilities": [], "defaultSize": "big" }
+    </script>
+  </head>
+  <body>
+    <div id="main">
+      <div id="badge">Timestamp</div>
+      <div id="input-label">Input: now</div>
+      <section id="cards">
+        <article class="card"><h2>ISO</h2><div id="iso" class="value"></div></article>
+        <article class="card"><h2>Local</h2><div id="local" class="value"></div></article>
+        <article class="card"><h2>Unix</h2><div id="unix" class="value"></div></article>
+      </section>
+      <div id="help">Examples: now, +90m, +2d, 2026-03-30 14:00, 1777777777</div>
+    </div>
+    <script>
+      const dom = {
+        input: document.getElementById("input-label"),
+        iso: document.getElementById("iso"),
+        local: document.getElementById("local"),
+        unix: document.getElementById("unix"),
+      };
+
+      window.addEventListener("message", (event) => {
+        const message = event.data;
+        if (!message || typeof message !== "object") return;
+        if (message.type === "captainslog:state") {
+          document.documentElement.style.setProperty("--theme-color", message.payload.theme.accentColor);
+          document.documentElement.setAttribute("data-theme", message.payload.theme.themeColor);
+          return;
+        }
+        if (message.type === "captainslog:plugin-context") {
+          renderTimestamp(message.payload.args || "");
+        }
+      });
+
+      window.parent.postMessage({ type: "captainslog:plugin-ready" }, "*");
+
+      function renderTimestamp(input) {
+        const trimmed = input.trim();
+        const resolved = resolveDate(trimmed);
+
+        dom.input.textContent = `Input: ${trimmed || "now"}`;
+
+        if (!resolved) {
+          dom.iso.textContent = "Invalid";
+          dom.local.textContent = "Invalid";
+          dom.unix.textContent = "Invalid";
+          return;
+        }
+
+        dom.iso.textContent = resolved.toISOString();
+        dom.local.textContent = new Intl.DateTimeFormat(undefined, {
+          dateStyle: "full",
+          timeStyle: "long",
+        }).format(resolved);
+        dom.unix.textContent = Math.floor(resolved.getTime() / 1000).toString();
+      }
+
+      function resolveDate(input) {
+        if (!input || input.toLowerCase() === "now") {
+          return new Date();
+        }
+
+        const relativeMatch = /^([+-])(\d+)(s|m|h|d|w)$/i.exec(input);
+        if (relativeMatch) {
+          const sign = relativeMatch[1] === "+" ? 1 : -1;
+          const amount = parseInt(relativeMatch[2], 10);
+          const unit = relativeMatch[3].toLowerCase();
+          const multipliers = { s: 1000, m: 60000, h: 3600000, d: 86400000, w: 604800000 };
+          return new Date(Date.now() + sign * amount * multipliers[unit]);
+        }
+
+        if (/^\d{10}$/.test(input)) {
+          return new Date(parseInt(input, 10) * 1000);
+        }
+
+        if (/^\d{13}$/.test(input)) {
+          return new Date(parseInt(input, 10));
+        }
+
+        const normalized = input.replace(" ", "T");
+        const parsed = new Date(normalized);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+      }
+    </script>
+  </body>
+</html>

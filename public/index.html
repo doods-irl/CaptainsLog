@@ -1,19 +1,23 @@
+<!DOCTYPE html>
 <html>
-    <head>
-        <link rel="stylesheet" href="styles.css">
-    </head>
-    <body>
-        <div id="main">
-            <div id="timer-display"></div>
-            <div id="error-message"></div>
-            <div id="category-container"></div>
-            <div id="textbox-container">
-                <form id="text-form">
-                    <input id="textbox" type="text" placeholder="Type here..." required>
-                </form>
-            </div>
-            <div id="log-container"> </div>
-        </div>
-        <script src="renderer.js"></script>
-    </body>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="shell.css">
+    <title>Captain's Log</title>
+  </head>
+  <body>
+    <div id="main">
+      <div id="error-message" role="status" aria-live="polite"></div>
+      <div id="category-container" aria-label="Categories and plugin suggestions"></div>
+      <form id="text-form">
+        <input id="textbox" type="text" placeholder="Type here..." autocomplete="off" required>
+      </form>
+      <div id="answer-plane">
+        <div id="notes-plane"></div>
+        <div id="plugin-plane"></div>
+      </div>
+    </div>
+    <script type="module" src="shell.js"></script>
+  </body>
 </html>

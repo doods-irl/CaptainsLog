@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UUID Plugin</title>
+    <style>
+      :root { --theme-color: tomato; --bg: #ebe5de; --panel: rgba(255,255,255,.78); --text: #161616; --muted: rgba(0,0,0,.66); }
+      html[data-theme="dark"] { --bg: #111111; --panel: rgba(255,255,255,.06); --text: #f2f2f2; --muted: rgba(255,255,255,.72); }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: radial-gradient(circle at bottom left, rgba(255,255,255,.22), transparent 38%), linear-gradient(140deg, color-mix(in srgb, var(--theme-color) 15%, var(--bg)) 0%, var(--bg) 72%); color: var(--text); font-family: Consolas, "Segoe UI", monospace; }
+      #main { display: grid; grid-template-rows: auto auto 1fr auto; gap: 14px; width: 100%; height: 100%; padding: 18px; box-sizing: border-box; }
+      #badge { width: fit-content; padding: 6px 10px; background: var(--theme-color); color: white; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; font-family: "Segoe UI", sans-serif; }
+      #status { font-size: 14px; color: var(--muted); font-family: "Segoe UI", sans-serif; }
+      #list { min-height: 0; overflow: auto; padding: 14px; background: var(--panel); backdrop-filter: blur(10px); white-space: pre-wrap; word-break: break-all; line-height: 1.5; }
+      #help { padding: 12px 14px; background: rgba(0,0,0,.08); font-size: 14px; font-family: "Segoe UI", sans-serif; }
+      #list::-webkit-scrollbar { width: 8px; }
+      #list::-webkit-scrollbar-track { background: transparent; }
+      #list::-webkit-scrollbar-thumb { background: rgba(0,0,0,.18); border-radius: 999px; }
+    </style>
+    <script id="captainslog-plugin" type="application/json">
+      { "id": "uuid", "name": "UUID", "command": "uuid", "aliases": ["guid", "id"], "version": "1.0.0", "description": "Generate one or more UUIDs on demand.", "capabilities": ["plugin-storage"], "defaultSize": "big" }
+    </script>
+  </head>
+  <body>
+    <div id="main">
+      <div id="badge">UUID</div>
+      <div id="status">Press Enter to generate, copy, and clear. Optional count after the command.</div>
+      <section id="list">No UUIDs generated yet.</section>
+      <div id="help">Examples: -uuid, -uuid 3, -uuid 10</div>
+    </div>
+    <script>
+      const PLUGIN_ID = "uuid";
+      const dom = {
+        status: document.getElementById("status"),
+        list: document.getElementById("list"),
+      };
+
+      const state = {
+        lastArgs: "",
+        uuids: [],
+      };
+
+      window.addEventListener("message", async (event) => {
+        const message = event.data;
+        if (!message || typeof message !== "object") return;
+        if (message.type === "captainslog:state") {
+          document.documentElement.style.setProperty("--theme-color", message.payload.theme.accentColor);
+          document.documentElement.setAttribute("data-theme", message.payload.theme.themeColor);
+          return;
+        }
+        if (message.type === "captainslog:plugin-context") {
+          state.lastArgs = message.payload.args || "";
+          if (state.uuids.length === 0) {
+            const saved = await callHost("plugin:get-data", { pluginId: PLUGIN_ID });
+            state.uuids = Array.isArray(saved?.uuids) ? saved.uuids : [];
+          }
+          render();
+          return;
+        }
+        if (message.type === "captainslog:plugin-submit") {
+          state.lastArgs = message.payload.args || "";
+          await generate();
+          await copyAndReset();
+        }
+      });
+
+      window.parent.postMessage({ type: "captainslog:plugin-ready" }, "*");
+
+      function render() {
+        const count = clampCount(parseInt(state.lastArgs.trim() || "1", 10));
+        dom.status.textContent = `Press Enter to generate ${count} UUID${count === 1 ? "" : "s"}, copy, and clear.`;
+        dom.list.textContent = state.uuids.length > 0 ? state.uuids.join("\n") : "No UUIDs generated yet.";
+      }
+
+      async function generate() {
+        const count = clampCount(parseInt(state.lastArgs.trim() || "1", 10));
+        state.uuids = Array.from({ length: count }, () => crypto.randomUUID());
+        await callHost("plugin:set-data", { pluginId: PLUGIN_ID, data: { uuids: state.uuids } });
+        render();
+      }
+
+      async function copyAndReset() {
+        if (state.uuids.length === 0) {
+          return;
+        }
+
+        await callHost("clipboard:write-text", { text: state.uuids.join("\n") });
+        await callHost("shell:reset-input", {});
+      }
+
+      function clampCount(value) {
+        if (!Number.isFinite(value) || value < 1) return 1;
+        return Math.min(value, 20);
+      }
+
+      function callHost(method, params) {
+        const requestId = `uuid-${Date.now()}-${Math.random()}`;
+        return new Promise((resolve, reject) => {
+          function onMessage(event) {
+            const message = event.data;
+            if (!message || message.type !== "captainslog:response" || message.requestId !== requestId) {
+              return;
+            }
+            window.removeEventListener("message", onMessage);
+            if (message.success) {
+              resolve(message.result);
+            } else {
+              reject(new Error(message.error));
+            }
+          }
+          window.addEventListener("message", onMessage);
+          window.parent.postMessage({ type: "captainslog:call", requestId, method, params }, "*");
+        });
+      }
+    </script>
+  </body>
+</html>
