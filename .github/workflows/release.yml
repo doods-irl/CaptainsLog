@@ -40,12 +40,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view captains-log-latest 1>$null 2>$null
+          gh release view captains-log-latest *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release delete captains-log-latest --yes --cleanup-tag
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "Failed to delete existing rolling release."
+              exit 1
+            }
+            Write-Host "Deleted existing rolling release."
           } else {
             Write-Host "No existing rolling release to replace."
           }
+          exit 0
 
       - name: Build and upload installer
         uses: tauri-apps/tauri-action@v1
