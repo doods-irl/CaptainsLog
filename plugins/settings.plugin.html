@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plugin Settings</title>
+    <style>
+      @font-face {
+        font-family: Figtree;
+        src:
+          url("figtree.ttf") format("truetype"),
+          url("../figtree.ttf") format("truetype"),
+          url("../public/assets/figtree.ttf") format("truetype");
+        font-weight: 100 900;
+        font-style: normal;
+        font-display: swap;
+      }
+      :root { --theme-color: tomato; --bg: #f3f1ee; --panel: rgba(255,255,255,.78); --text: #171717; --muted: rgba(0,0,0,.62); --line: rgba(0,0,0,.12); }
+      html[data-theme="dark"] { --bg: #111; --panel: rgba(255,255,255,.06); --text: #efefef; --muted: rgba(255,255,255,.64); --line: rgba(255,255,255,.12); }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: Figtree, Segoe UI, sans-serif !important; }
+      *, *::before, *::after { box-sizing: border-box; font-family: Figtree, Segoe UI, sans-serif !important; }
+      #main { display: grid; grid-template-rows: auto 1fr; gap: 12px; width: 100%; height: 100%; box-sizing: border-box; padding: 18px; }
+      #header { display: flex; justify-content: space-between; gap: 16px; align-items: end; border-bottom: 3px solid var(--theme-color); padding-bottom: 8px; }
+      h1 { margin: 0; font-size: 20px; }
+      #status { color: var(--muted); font-size: 13px; text-align: right; }
+      #list { min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: 8px; padding-right: 4px; }
+      .plugin-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+      .plugin-row.selected { border-color: var(--theme-color); box-shadow: inset 4px 0 0 var(--theme-color); }
+      .plugin-name { font-weight: 800; }
+      .plugin-meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+      button { appearance: none; border: 0; border-radius: 5px; padding: 7px 10px; background: var(--theme-color); color: white; font: inherit; font-weight: 800; cursor: pointer; }
+      button.secondary { background: rgba(0,0,0,.14); color: var(--text); }
+      html[data-theme="dark"] button.secondary { background: rgba(255,255,255,.14); }
+      button[disabled] { opacity: .42; cursor: default; }
+      #list::-webkit-scrollbar { width: 8px; }
+      #list::-webkit-scrollbar-track { background: transparent; }
+      #list::-webkit-scrollbar-thumb { background: rgba(0,0,0,.18); border-radius: 999px; }
+    </style>
+    <script id="captainslog-plugin" type="application/json">
+      { "id": "settings", "name": "Settings", "command": "settings", "aliases": ["plugins"], "version": "1.0.0", "description": "Toggle plugins and open plugin-specific settings.", "capabilities": ["settings"], "defaultSize": "big", "hasSettings": false }
+    </script>
+  </head>
+  <body>
+    <div id="main">
+      <header id="header">
+        <h1>Plugins</h1>
+        <div id="status"></div>
+      </header>
+      <div id="list"></div>
+    </div>
+    <script>
+      const host = createHostBridge();
+      const dom = {
+        list: document.getElementById("list"),
+        status: document.getElementById("status"),
+      };
+      let plugins = [];
+      let filterText = "";
+      let selectedIndex = 0;
+      let loaded = false;
+
+      host.onState((payload) => {
+        document.documentElement.style.setProperty("--theme-color", payload.theme.accentColor);
+        document.documentElement.setAttribute("data-theme", payload.theme.themeColor);
+        if (!loaded) {
+          loadPlugins();
+        }
+      });
+      host.onContext((payload) => {
+        filterText = normalizeFilter(payload.args || "");
+        selectedIndex = 0;
+        render();
+      });
+
+      window.parent.postMessage({ type: "captainslog:plugin-ready" }, "*");
+
+      async function loadPlugins() {
+        try {
+          plugins = await host.call("shell:list-plugin-settings", {});
+          loaded = true;
+          render();
+        } catch (error) {
+          dom.status.textContent = error.message || String(error);
+        }
+      }
+
+      function render() {
+        dom.list.innerHTML = "";
+        const visiblePlugins = filteredPlugins();
+        selectedIndex = visiblePlugins.length
+          ? Math.max(0, Math.min(selectedIndex, visiblePlugins.length - 1))
+          : 0;
+        dom.status.textContent = filterText
+          ? `${visiblePlugins.length} of ${plugins.length}`
+          : `${plugins.length} installed`;
+        visiblePlugins.forEach((plugin, index) => {
+          const row = document.createElement("section");
+          row.className = "plugin-row";
+          if (index === selectedIndex) {
+            row.classList.add("selected");
+          }
+
+          const details = document.createElement("div");
+          const title = document.createElement("div");
+          title.className = "plugin-name";
+          title.textContent = plugin.name;
+          const meta = document.createElement("div");
+          meta.className = "plugin-meta";
+          meta.textContent = `-${plugin.command}  ${plugin.description || ""}`;
+          details.append(title, meta);
+
+          const toggle = document.createElement("button");
+          toggle.type = "button";
+          toggle.textContent = plugin.enabled ? "On" : "Off";
+          toggle.className = plugin.enabled ? "" : "secondary";
+          toggle.disabled = plugin.id === "settings";
+          toggle.addEventListener("click", () => setEnabled(plugin, !plugin.enabled));
+
+          const settings = document.createElement("button");
+          settings.type = "button";
+          settings.textContent = "Settings";
+          settings.className = "secondary";
+          settings.disabled = !plugin.hasSettings;
+          settings.addEventListener("click", () => openSettings(plugin));
+
+          row.append(details, toggle, settings);
+          dom.list.appendChild(row);
+        });
+      }
+
+      function filteredPlugins() {
+        if (!filterText) {
+          return plugins;
+        }
+
+        return plugins.filter((plugin) => {
+          const haystacks = [
+            plugin.name,
+            plugin.command,
+            plugin.description || "",
+            ...(plugin.aliases || []),
+          ];
+          return haystacks.some((value) => value.toLowerCase().includes(filterText));
+        });
+      }
+
+      function normalizeFilter(value) {
+        return value
+          .replace(/^--settings\b/i, "")
+          .replace(/^settings\b/i, "")
+          .trim()
+          .toLowerCase();
+      }
+
+      async function setEnabled(plugin, enabled) {
+        try {
+          await host.call("shell:set-plugin-enabled", { pluginId: plugin.id, enabled });
+          await loadPlugins();
+        } catch (error) {
+          dom.status.textContent = error.message || String(error);
+        }
+      }
+
+      async function openSettings(plugin) {
+        if (!plugin?.hasSettings) {
+          return;
+        }
+
+        try {
+          await host.call("shell:open-plugin-settings", { pluginId: plugin.id });
+        } catch (error) {
+          dom.status.textContent = error.message || String(error);
+        }
+      }
+
+      function moveSelection(direction) {
+        const visiblePlugins = filteredPlugins();
+        if (visiblePlugins.length === 0) {
+          return;
+        }
+
+        selectedIndex = (selectedIndex + direction + visiblePlugins.length) % visiblePlugins.length;
+        render();
+        dom.list.querySelector(".plugin-row.selected")?.scrollIntoView({ block: "nearest" });
+      }
+
+      function openSelectedSettings() {
+        const plugin = filteredPlugins()[selectedIndex];
+        openSettings(plugin);
+      }
+
+      function installPluginFont(payload) {
+        if (!payload?.fontAsset || document.getElementById("captainslog-figtree-font")) return;
+        const style = document.createElement("style");
+        style.id = "captainslog-figtree-font";
+        style.textContent = `@font-face { font-family: Figtree; src: url("${payload.fontAsset}") format("truetype"); font-weight: 100 900; font-style: normal; font-display: swap; } *, *::before, *::after { font-family: Figtree, Segoe UI, sans-serif !important; }`;
+        document.head.appendChild(style);
+      }
+      function createHostBridge() {
+        let requestId = 0;
+        const pending = new Map();
+        const listeners = { state: [], context: [], key: [] };
+        window.addEventListener("message", (event) => {
+          const message = event.data;
+          if (!message || typeof message !== "object") return;
+          if (message.type === "captainslog:state") { installPluginFont(message.payload);
+            listeners.state.forEach((listener) => listener(message.payload));
+            return;
+          }
+          if (message.type === "captainslog:plugin-context") {
+            listeners.context.forEach((listener) => listener(message.payload));
+            return;
+          }
+          if (message.type === "captainslog:plugin-key") {
+            listeners.key.forEach((listener) => listener(message.payload));
+            return;
+          }
+          if (message.type === "captainslog:response") {
+            const resolver = pending.get(message.requestId);
+            if (!resolver) return;
+            pending.delete(message.requestId);
+            message.success ? resolver.resolve(message.result) : resolver.reject(new Error(message.error));
+          }
+        });
+        return {
+          call(method, params) {
+            requestId += 1;
+            return new Promise((resolve, reject) => {
+              pending.set(requestId, { resolve, reject });
+              window.parent.postMessage({ type: "captainslog:call", requestId, method, params }, "*");
+            });
+          },
+          onState(listener) { listeners.state.push(listener); },
+          onContext(listener) { listeners.context.push(listener); },
+          onKey(listener) { listeners.key.push(listener); },
+        };
+      }
+
+      host.onKey((payload) => {
+        if (payload.key === "ArrowDown") {
+          moveSelection(1);
+        } else if (payload.key === "ArrowUp") {
+          moveSelection(-1);
+        } else if (payload.key === "Enter") {
+          openSelectedSettings();
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -1,11 +1,11 @@
 @font-face {
-    font-family: 'HKGrotesk';
-    src: url('assets/HKGrotesk-Regular.ttf');
+    font-family: 'Figtree';
+    src: url('assets/figtree.ttf');
 }
 
 body {
     margin: 0;
-    font-family: HKGrotesk;
+    font-family: Figtree;
     font-size: medium;
     background-color: #FFF;
     display: flex;
@@ -13,6 +13,7 @@ body {
     align-items: center;
     overflow: hidden;
 }
+      *, *::before, *::after { font-family: Figtree, Segoe UI, sans-serif; }
 
 #main {
     width: 100%;
@@ -78,7 +79,7 @@ h2 {
 }
 
 button {
-    font-family: HKGrotesk;
+    font-family: Figtree;
     font-size: smaller;
     font-weight: 600;
     color: white;

@@ -5,9 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Converter Plugin</title>
     <style>
+      @font-face { font-family: Figtree; src: url("../figtree.ttf"); }
       :root { --theme-color: tomato; --bg: #efece4; --panel: rgba(255,255,255,.78); --text: #171717; --muted: rgba(0,0,0,.65); }
       html[data-theme="dark"] { --bg: #121212; --panel: rgba(255,255,255,.06); --text: #f3f3f3; --muted: rgba(255,255,255,.72); }
-      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: linear-gradient(145deg, color-mix(in srgb, var(--theme-color) 16%, var(--bg)) 0%, var(--bg) 70%); color: var(--text); font-family: Segoe UI, sans-serif; }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: linear-gradient(145deg, color-mix(in srgb, var(--theme-color) 16%, var(--bg)) 0%, var(--bg) 70%); color: var(--text); font-family: Figtree, Segoe UI, sans-serif; }
+      *, *::before, *::after { font-family: Figtree, Segoe UI, sans-serif; }
       #main { display: grid; grid-template-rows: auto 1fr auto; gap: 14px; width: 100%; height: 100%; padding: 18px; box-sizing: border-box; }
       #badge { width: fit-content; padding: 6px 10px; background: var(--theme-color); color: white; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
       #result { display: grid; gap: 8px; align-content: center; justify-items: center; min-height: 0; background: var(--panel); backdrop-filter: blur(10px); padding: 18px; text-align: center; }
@@ -55,10 +57,17 @@
         day: { family: "time", toBase: 86400 },
       };
 
+      function installPluginFont(payload) {
+        if (!payload?.fontAsset || document.getElementById("captainslog-figtree-font")) return;
+        const style = document.createElement("style");
+        style.id = "captainslog-figtree-font";
+        style.textContent = `@font-face { font-family: Figtree; src: url("${payload.fontAsset}") format("truetype"); font-weight: 100 900; font-style: normal; font-display: swap; } *, *::before, *::after { font-family: Figtree, Segoe UI, sans-serif !important; }`;
+        document.head.appendChild(style);
+      }
       window.addEventListener("message", (event) => {
         const message = event.data;
         if (!message || typeof message !== "object") return;
-        if (message.type === "captainslog:state") {
+        if (message.type === "captainslog:state") { installPluginFont(message.payload);
           document.documentElement.style.setProperty("--theme-color", message.payload.theme.accentColor);
           document.documentElement.setAttribute("data-theme", message.payload.theme.themeColor);
           return;

@@ -91,6 +91,11 @@ out
 .nuxt
 dist
 
+# Tauri / Rust build output
+src-tauri/target/
+src-tauri/gen/
+.cache/
+
 # Gatsby files
 .cache/
 # Comment in the public line in if your project uses Gatsby and not Next.js

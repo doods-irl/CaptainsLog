@@ -5,19 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Notes Plugin</title>
     <style>
+      @font-face { font-family: Figtree; src: url("../figtree.ttf"); }
       :root { --theme-color: tomato; --text-color: #000; --background-color: #ccc; --textbox-color: #eee; --nav-inactive-color: #eee; --shadow-color: rgba(0,0,0,.16); }
       html[data-theme="dark"] { --text-color: #ccc; --background-color: #191919; --textbox-color: #111; --nav-inactive-color: #444; }
-      html, body { margin: 0; width: 100%; height: 100%; background: var(--background-color); color: var(--text-color); overflow: hidden; font-family: Segoe UI, sans-serif; }
+      html, body { margin: 0; width: 100%; height: 100%; background: var(--background-color); color: var(--text-color); overflow: hidden; font-family: Figtree, Segoe UI, sans-serif; }
+      *, *::before, *::after { font-family: Figtree, Segoe UI, sans-serif; }
       #main { display: grid; grid-template-rows: auto 60px minmax(0,1fr); width: 100%; height: 100%; }
-      #error-message { display: none; position: absolute; top: 38px; right: 10px; z-index: 4; max-width: 280px; padding: 5px 8px; background: var(--theme-color); color: white; font-size: 12px; }
+      #error-message { display: none; position: absolute; top: 38px; right: 10px; z-index: 4; max-width: 280px; padding: 5px 8px; background: var(--theme-color); color: white; font-size: 12px; border-radius: 0 0 3px 3px; }
       #category-container { display: flex; gap: 4px; align-items: center; overflow-x: auto; overflow-y: hidden; min-height: 30px; padding: 4px 8px 0 4px; box-sizing: border-box; scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.18) transparent; }
-      .nav-element { appearance: none; border: 0; border-radius: 0; padding: 4px 8px; background: var(--nav-inactive-color); color: var(--text-color); cursor: pointer; white-space: nowrap; box-shadow: 0 1px 3px var(--shadow-color); }
+      .nav-element { appearance: none; border: 0; border-radius: 5px 5px 0 0; padding: 4px 8px; background: var(--nav-inactive-color); color: var(--text-color); cursor: pointer; white-space: nowrap; box-shadow: 0 1px 3px var(--shadow-color); }
       .nav-element.selected { background: var(--theme-color); color: white; }
       #textbox { width: 100%; height: 60px; box-sizing: border-box; border: 0; outline: none; padding: 10px 14px; font-size: 24px; font-weight: 700; background: var(--textbox-color); color: var(--text-color); }
       #log-container { overflow-y: auto; overflow-x: hidden; min-height: 0; scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.18) transparent; }
       h2 { margin: 0; padding: 6px 7px 4px; background: var(--textbox-color); border-top: 3px solid var(--theme-color); border-bottom: 3px solid var(--theme-color); border-radius: 0; text-align: center; position: sticky; top: 0; }
       .category-log-container { padding-bottom: 4px; box-sizing: border-box; }
-      .log-item { display: block; width: calc(100% - 8px); margin: 4px; padding: 8px 10px; box-sizing: border-box; border: 0; outline: none; background: var(--nav-inactive-color); color: var(--text-color); box-shadow: 0 1px 3px var(--shadow-color); }
+      .log-item { display: block; width: calc(100% - 8px); margin: 4px; padding: 8px 10px; box-sizing: border-box; border: 0; outline: none; background: var(--nav-inactive-color); color: var(--text-color); border-radius: 6px; box-shadow: 0 1px 3px var(--shadow-color); }
       .log-item.selected { background: var(--theme-color); color: white; }
       .log-item[data-log-status="done"] { text-decoration: line-through; color: #777; background: transparent; }
       #category-container::-webkit-scrollbar, #log-container::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -48,6 +50,13 @@
       window.addEventListener("keydown", handleKeyDown);
       window.addEventListener("keyup", (event) => { delete state.keysPressed[event.key]; });
 
+      function installPluginFont(payload) {
+        if (!payload?.fontAsset || document.getElementById("captainslog-figtree-font")) return;
+        const style = document.createElement("style");
+        style.id = "captainslog-figtree-font";
+        style.textContent = `@font-face { font-family: Figtree; src: url("${payload.fontAsset}") format("truetype"); font-weight: 100 900; font-style: normal; font-display: swap; } *, *::before, *::after { font-family: Figtree, Segoe UI, sans-serif !important; }`;
+        document.head.appendChild(style);
+      }
       function createHostBridge() {
         let requestId = 0;
         const pending = new Map();
@@ -55,7 +64,7 @@
         window.addEventListener("message", (event) => {
           const message = event.data;
           if (!message || typeof message !== "object") return;
-          if (message.type === "captainslog:state") { listeners.state.forEach((listener) => listener(message.payload)); return; }
+          if (message.type === "captainslog:state") { installPluginFont(message.payload); listeners.state.forEach((listener) => listener(message.payload)); return; }
           if (message.type === "captainslog:editor-command") { listeners.editorCommand.forEach((listener) => listener(message.payload)); return; }
           if (message.type === "captainslog:response") {
             const resolver = pending.get(message.requestId);

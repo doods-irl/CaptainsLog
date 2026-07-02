@@ -5,9 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Timestamp Plugin</title>
     <style>
+      @font-face { font-family: Figtree; src: url("../figtree.ttf"); }
       :root { --theme-color: tomato; --bg: #ebe8ee; --panel: rgba(255,255,255,.78); --text: #181818; --muted: rgba(0,0,0,.68); }
       html[data-theme="dark"] { --bg: #111215; --panel: rgba(255,255,255,.06); --text: #f3f3f3; --muted: rgba(255,255,255,.72); }
-      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: linear-gradient(160deg, color-mix(in srgb, var(--theme-color) 13%, var(--bg)) 0%, var(--bg) 72%); color: var(--text); font-family: Segoe UI, sans-serif; }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: linear-gradient(160deg, color-mix(in srgb, var(--theme-color) 13%, var(--bg)) 0%, var(--bg) 72%); color: var(--text); font-family: Figtree, Segoe UI, sans-serif; }
+      *, *::before, *::after { font-family: Figtree, Segoe UI, sans-serif; }
       #main { display: grid; grid-template-rows: auto auto 1fr auto; gap: 14px; width: 100%; height: 100%; padding: 18px; box-sizing: border-box; }
       #badge { width: fit-content; padding: 6px 10px; background: var(--theme-color); color: white; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
       #input-label { color: var(--muted); font-size: 14px; }
@@ -40,10 +42,17 @@
         unix: document.getElementById("unix"),
       };
 
+      function installPluginFont(payload) {
+        if (!payload?.fontAsset || document.getElementById("captainslog-figtree-font")) return;
+        const style = document.createElement("style");
+        style.id = "captainslog-figtree-font";
+        style.textContent = `@font-face { font-family: Figtree; src: url("${payload.fontAsset}") format("truetype"); font-weight: 100 900; font-style: normal; font-display: swap; } *, *::before, *::after { font-family: Figtree, Segoe UI, sans-serif !important; }`;
+        document.head.appendChild(style);
+      }
       window.addEventListener("message", (event) => {
         const message = event.data;
         if (!message || typeof message !== "object") return;
-        if (message.type === "captainslog:state") {
+        if (message.type === "captainslog:state") { installPluginFont(message.payload);
           document.documentElement.style.setProperty("--theme-color", message.payload.theme.accentColor);
           document.documentElement.setAttribute("data-theme", message.payload.theme.themeColor);
           return;

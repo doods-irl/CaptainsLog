@@ -19,19 +19,20 @@ html[data-theme="dark"] {
 }
 
 @font-face {
-  font-family: "HKGrotesk";
-  src: url("assets/HKGrotesk-Regular.ttf");
+  font-family: "Figtree";
+  src: url("assets/figtree.ttf");
 }
 
 body {
   margin: 0;
-  font-family: HKGrotesk;
+  font-family: Figtree;
   font-size: x-large;
   color: var(--text-color);
   background-color: var(--background-color);
   overflow: hidden;
   height: 100vh;
 }
+      *, *::before, *::after { font-family: Figtree, Segoe UI, sans-serif; }
 
 #main {
   display: grid;
@@ -110,7 +111,7 @@ body {
   width: 100%;
   height: 60px;
   padding: 10px 14px;
-  font-family: HKGrotesk;
+  font-family: Figtree;
   font-size: x-large;
   font-weight: 1000;
   outline: 0;
@@ -150,7 +151,7 @@ body {
 }
 
 .log-item {
-  font-family: HKGrotesk;
+  font-family: Figtree;
   font-size: medium;
   font-weight: 600;
   margin: 4px;

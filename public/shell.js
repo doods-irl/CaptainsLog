@@ -17,6 +17,8 @@ const state = {
   pluginSuggestionIndex: 0,
   activePlugin: null,
   pluginCompletionQuery: null,
+  pluginExpansionId: null,
+  categoryPrefill: false,
 };
 
 const dom = {
@@ -28,7 +30,12 @@ const dom = {
   pluginPlane: document.getElementById("plugin-plane"),
 };
 
-window.electronAPI.onShellState((payload) => {
+if (!window.hostAPI) {
+  document.body.textContent = "Captain's Log could not start: host API is unavailable.";
+  throw new Error("host API is unavailable");
+}
+
+window.hostAPI.onShellState((payload) => {
   state.shellState = payload;
   applyTheme();
   ensureFrames();
@@ -36,7 +43,7 @@ window.electronAPI.onShellState((payload) => {
   broadcastState();
 });
 
-window.electronAPI.onEditorCommand((payload) => {
+window.hostAPI.onEditorCommand((payload) => {
   broadcastMessage({
     type: "captainslog:editor-command",
     payload,
@@ -48,8 +55,30 @@ window.electronAPI.onEditorCommand((payload) => {
     return;
   }
 
+  if (payload.type === "request-shell-state") {
+    window.hostAPI.requestShellState();
+    return;
+  }
+
+  if (payload.type === "plugin-error") {
+    displayError(payload.message || "Plugin error", 6000);
+    return;
+  }
+
   if (payload.type === "prepare-show") {
+    if (state.shellState && payload.mode) {
+      state.shellState.editorMode = payload.mode;
+    }
     resetInput();
+    render();
+    focusTextbox();
+    return;
+  }
+
+  if (payload.type === "open-plugin-settings") {
+    dom.textbox.value = `-${payload.command} --settings`;
+    state.categoryPrefill = false;
+    state.activePlugin = getPluginById(payload.pluginId, true);
     render();
     focusTextbox();
   }
@@ -74,7 +103,7 @@ window.addEventListener("message", async (event) => {
   const { requestId, method, params } = event.data;
 
   try {
-    const result = await window.electronAPI.invokeHost(method, params);
+    const result = await window.hostAPI.invokeHost(method, params);
     currentFrame.contentWindow.postMessage(
       {
         type: "captainslog:response",
@@ -99,13 +128,16 @@ window.addEventListener("message", async (event) => {
 
 dom.form.addEventListener("submit", handleSubmit);
 dom.textbox.addEventListener("input", handleTextboxInput);
+dom.textbox.addEventListener("focus", () => {
+  state.currentSelectedLogId = null;
+});
 
 window.addEventListener("keydown", handleKeyDown);
 window.addEventListener("keyup", (event) => {
   delete state.keysPressed[event.key];
 });
 
-window.electronAPI.requestShellState();
+window.hostAPI.requestShellState();
 
 function applyTheme() {
   if (!state.shellState) {
@@ -121,7 +153,7 @@ function ensureFrames() {
     return;
   }
 
-  state.shellState.plugins.forEach((plugin) => {
+  getKnownPlugins(true).forEach((plugin) => {
     if (state.frames.has(plugin.id)) {
       return;
     }
@@ -129,7 +161,7 @@ function ensureFrames() {
     const frame = document.createElement("iframe");
     frame.className = "plugin-frame";
     frame.dataset.pluginId = plugin.id;
-    frame.sandbox = "allow-scripts allow-forms";
+    frame.sandbox = "allow-scripts allow-forms allow-same-origin";
     frame.src = plugin.src;
     frame.addEventListener("load", () => {
       postStateToFrame(frame);
@@ -174,12 +206,14 @@ function updatePluginMode() {
 
   if (selectedPlugin) {
     state.activePlugin = selectedPlugin;
+    expandEditorForPlugin(selectedPlugin);
     state.pluginSuggestionIndex = Math.max(
       0,
       state.pluginSuggestions.findIndex((plugin) => plugin.id === selectedPlugin.id)
     );
   } else {
     state.activePlugin = null;
+    state.pluginExpansionId = null;
     if (state.pluginSuggestions.length > 0) {
       state.pluginSuggestionIndex = Math.max(
         0,
@@ -189,6 +223,17 @@ function updatePluginMode() {
       state.pluginSuggestionIndex = 0;
     }
   }
+}
+
+function expandEditorForPlugin(plugin) {
+  if (state.shellState?.editorMode === "big" || state.pluginExpansionId === plugin.id) {
+    return;
+  }
+
+  state.pluginExpansionId = plugin.id;
+  window.hostAPI.showEditor("big", { preserveInput: true }).catch((error) => {
+    displayError(error?.message || String(error), 4000);
+  });
 }
 
 function getPluginSuggestions() {
@@ -202,10 +247,10 @@ function getPluginSuggestions() {
   }
 
   if (query === "") {
-    return state.shellState.plugins.slice();
+    return getKnownPlugins(false);
   }
 
-  return state.shellState.plugins.filter((plugin) => {
+  return getKnownPlugins(false).filter((plugin) => {
     const haystacks = [plugin.command, ...(plugin.aliases || []), plugin.name.toLowerCase()];
     return haystacks.some((value) => value.toLowerCase().startsWith(query));
   });
@@ -249,10 +294,22 @@ function getSelectedPluginFromInput() {
   }
 
   const token = match[1].toLowerCase();
-  return state.shellState.plugins.find((plugin) =>
+  const includeDisabled = dom.textbox.value.includes("--settings");
+  return getKnownPlugins(includeDisabled).find((plugin) =>
     plugin.command.toLowerCase() === token ||
     (plugin.aliases || []).some((alias) => alias.toLowerCase() === token)
   ) || null;
+}
+
+function getKnownPlugins(includeDisabled) {
+  const plugins = includeDisabled
+    ? (state.shellState?.allPlugins || state.shellState?.plugins || [])
+    : (state.shellState?.plugins || []);
+  return includeDisabled ? plugins : plugins.filter((plugin) => plugin.enabled !== false);
+}
+
+function getPluginById(pluginId, includeDisabled = false) {
+  return getKnownPlugins(includeDisabled).find((plugin) => plugin.id === pluginId) || null;
 }
 
 function buildCategoryList() {
@@ -318,6 +375,10 @@ function getVisibleCategories() {
 }
 
 function getCategoryFilter() {
+  if (state.categoryPrefill && /^\/[\w.-]+(:[\w.-]+)? $/.test(dom.textbox.value)) {
+    return "";
+  }
+
   const trimmed = dom.textbox.value.trim();
   if (!trimmed.startsWith("/")) {
     return "";
@@ -467,7 +528,9 @@ function syncPluginFrames() {
 function broadcastState() {
   for (const frame of state.frames.values()) {
     postStateToFrame(frame);
-    postPluginContextToFrame(frame);
+    if (state.activePlugin?.id === frame.dataset.pluginId) {
+      postPluginContextToFrame(frame);
+    }
   }
 }
 
@@ -491,7 +554,7 @@ function postPluginContextToFrame(frame) {
   }
 
   const pluginId = frame.dataset.pluginId;
-  const plugin = state.shellState?.plugins.find((entry) => entry.id === pluginId) || null;
+  const plugin = getPluginById(pluginId, true);
   const context = buildPluginContext(plugin);
 
   frame.contentWindow.postMessage(
@@ -549,9 +612,10 @@ function getFrameByWindow(sourceWindow) {
 }
 
 function handleTextboxInput() {
+  state.categoryPrefill = false;
+  state.currentSelectedLogId = null;
   if (dom.textbox.value.trim() === "") {
     state.currentCategoryIndex = 0;
-    state.currentSelectedLogId = null;
   }
 
   render();
@@ -591,11 +655,11 @@ async function handleSubmit(event) {
     return;
   }
 
-  await window.electronAPI.invokeHost("notes:add-entry", { formData: textboxValue });
+  await window.hostAPI.invokeHost("notes:add-entry", { formData: textboxValue });
   dom.textbox.value = "";
 
   if (state.shellState.editorMode === "mini") {
-    window.electronAPI.invokeHost("shell:request-hide", {});
+    window.hostAPI.invokeHost("shell:request-hide", {});
   }
 }
 
@@ -625,7 +689,7 @@ async function submitCategoryDelete(categoryName) {
     return;
   }
 
-  await window.electronAPI.invokeHost("notes:delete-category", { categoryName });
+  await window.hostAPI.invokeHost("notes:delete-category", { categoryName });
   dom.textbox.value = "delete:";
 }
 
@@ -635,7 +699,7 @@ async function submitCategoryEmpty(categoryName) {
     return;
   }
 
-  await window.electronAPI.invokeHost("notes:empty-category", { categoryName });
+  await window.hostAPI.invokeHost("notes:empty-category", { categoryName });
   dom.textbox.value = "empty:";
 }
 
@@ -659,11 +723,11 @@ async function submitCategoryCommand(textboxValue) {
     return;
   }
 
-  await window.electronAPI.invokeHost("notes:add-entry", { formData: textboxValue });
+  await window.hostAPI.invokeHost("notes:add-entry", { formData: textboxValue });
   dom.textbox.value = category ? `/${category} ` : "";
 
   if (state.shellState.editorMode === "mini") {
-    window.electronAPI.invokeHost("shell:request-hide", {});
+    window.hostAPI.invokeHost("shell:request-hide", {});
   }
 }
 
@@ -684,7 +748,7 @@ async function confirmCategoryDelete(category) {
 
   clearTimeout(state.confirmation.deleteTimeoutId);
   state.confirmation.deletePending = false;
-  await window.electronAPI.invokeHost("notes:delete-category", { categoryName: category });
+  await window.hostAPI.invokeHost("notes:delete-category", { categoryName: category });
   resetInput();
   render();
 }
@@ -706,7 +770,7 @@ async function confirmCategoryEmpty(category) {
 
   clearTimeout(state.confirmation.emptyTimeoutId);
   state.confirmation.emptyPending = false;
-  await window.electronAPI.invokeHost("notes:empty-category", { categoryName: category });
+  await window.hostAPI.invokeHost("notes:empty-category", { categoryName: category });
   dom.textbox.value = `/${category} `;
 }
 
@@ -722,7 +786,7 @@ async function moveCategory(category, command) {
     return;
   }
 
-  await window.electronAPI.invokeHost("notes:move-category", {
+  await window.hostAPI.invokeHost("notes:move-category", {
     categoryName: category,
     position: parseInt(match[1], 10),
   });
@@ -736,6 +800,9 @@ function categoryExists(categoryName) {
 
 function handleKeyDown(event) {
   state.keysPressed[event.key] = true;
+  if (doesKeyEditTextbox(event)) {
+    state.categoryPrefill = false;
+  }
 
   if (isPluginCommandMode()) {
     handlePluginNavigation(event);
@@ -768,6 +835,12 @@ function isPluginCommandMode() {
 }
 
 function handlePluginNavigation(event) {
+  if (state.activePlugin?.id === "settings" && ["ArrowDown", "ArrowUp", "Enter"].includes(event.key)) {
+    event.preventDefault();
+    postActivePluginKey(event);
+    return;
+  }
+
   if ((event.key === "Tab" || event.key === "ArrowRight" || event.key === "ArrowLeft") && state.pluginSuggestions.length > 0) {
     event.preventDefault();
     const direction = (event.key === "ArrowLeft" || (event.key === "Tab" && state.keysPressed.Shift)) ? -1 : 1;
@@ -783,11 +856,33 @@ function handlePluginNavigation(event) {
   }
 }
 
+function postActivePluginKey(event) {
+  const frame = state.activePlugin ? state.frames.get(state.activePlugin.id) : null;
+  if (!frame?.contentWindow) {
+    return;
+  }
+
+  frame.contentWindow.postMessage(
+    {
+      type: "captainslog:plugin-key",
+      payload: {
+        key: event.key,
+        shiftKey: event.shiftKey,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+        metaKey: event.metaKey,
+      },
+    },
+    "*"
+  );
+}
+
 function activatePluginSuggestion(plugin) {
   const effectiveQuery = getEffectivePluginQuery();
   const rawQuery = getPluginQuery();
   state.pluginCompletionQuery = effectiveQuery ?? rawQuery ?? plugin.command.toLowerCase();
   dom.textbox.value = `-${plugin.command} `;
+  state.categoryPrefill = false;
   state.activePlugin = plugin;
   render();
   focusTextbox();
@@ -933,7 +1028,7 @@ async function deleteSelectedLog() {
     return;
   }
 
-  await window.electronAPI.invokeHost("notes:delete-logs", {
+  await window.hostAPI.invokeHost("notes:delete-logs", {
     logDataArray: [{
       logCategory: selectedCategory.name,
       logId: String(state.currentSelectedLogId),
@@ -949,7 +1044,7 @@ async function toggleDone() {
     return;
   }
 
-  await window.electronAPI.invokeHost("notes:toggle-done", {
+  await window.hostAPI.invokeHost("notes:toggle-done", {
     logDataArray: [{
       logCategory: selectedCategory.name,
       logId: state.currentSelectedLogId,
@@ -963,14 +1058,14 @@ function queueLogEdit(content, category, id) {
   }
 
   state.debounceTimer = setTimeout(() => {
-    window.electronAPI.invokeHost("notes:edit-logs", {
+    window.hostAPI.invokeHost("notes:edit-logs", {
       logDataArray: [{ content, category, id: String(id) }],
     });
   }, 500);
 }
 
 function restoreFocus() {
-  if (state.activePlugin || state.currentSelectedLogId == null) {
+  if (state.activePlugin || state.currentSelectedLogId == null || document.activeElement === dom.textbox) {
     return;
   }
 
@@ -995,15 +1090,26 @@ function syncTextboxToSelection() {
   dom.textbox.value = !selectedCategory || selectedCategory.name === "notes"
     ? ""
     : `/${selectedCategory.name} `;
+  state.categoryPrefill = Boolean(dom.textbox.value);
 }
 
 function resetInput() {
   dom.textbox.value = "";
+  state.categoryPrefill = false;
   state.currentCategoryIndex = 0;
   state.currentSelectedLogId = null;
   state.activePlugin = null;
   state.pluginSuggestions = [];
   state.pluginCompletionQuery = null;
+  state.pluginExpansionId = null;
+}
+
+function doesKeyEditTextbox(event) {
+  if (document.activeElement !== dom.textbox || event.ctrlKey || event.metaKey || event.altKey) {
+    return false;
+  }
+
+  return event.key.length === 1 || event.key === "Backspace" || event.key === "Delete";
 }
 
 function updateTextboxColor() {

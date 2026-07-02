@@ -5,9 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Transform Plugin</title>
     <style>
+      @font-face { font-family: Figtree; src: url("../figtree.ttf"); }
       :root { --theme-color: tomato; --bg: #eee8df; --panel: rgba(255,255,255,.78); --text: #171717; --muted: rgba(0,0,0,.65); }
       html[data-theme="dark"] { --bg: #101010; --panel: rgba(255,255,255,.06); --text: #f2f2f2; --muted: rgba(255,255,255,.72); }
-      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: radial-gradient(circle at top left, rgba(255,255,255,.22), transparent 35%), linear-gradient(145deg, color-mix(in srgb, var(--theme-color) 14%, var(--bg)) 0%, var(--bg) 70%); color: var(--text); font-family: Segoe UI, sans-serif; }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: radial-gradient(circle at top left, rgba(255,255,255,.22), transparent 35%), linear-gradient(145deg, color-mix(in srgb, var(--theme-color) 14%, var(--bg)) 0%, var(--bg) 70%); color: var(--text); font-family: Figtree, Segoe UI, sans-serif; }
+      *, *::before, *::after { font-family: Figtree, Segoe UI, sans-serif; }
       #main { display: grid; grid-template-rows: auto auto 1fr auto; gap: 14px; width: 100%; height: 100%; padding: 18px; box-sizing: border-box; }
       #badge { width: fit-content; padding: 6px 10px; background: var(--theme-color); color: white; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
       #mode { font-size: 15px; color: var(--muted); }
@@ -39,10 +41,17 @@
         lastResult: "HELLO WORLD",
       };
 
+      function installPluginFont(payload) {
+        if (!payload?.fontAsset || document.getElementById("captainslog-figtree-font")) return;
+        const style = document.createElement("style");
+        style.id = "captainslog-figtree-font";
+        style.textContent = `@font-face { font-family: Figtree; src: url("${payload.fontAsset}") format("truetype"); font-weight: 100 900; font-style: normal; font-display: swap; } *, *::before, *::after { font-family: Figtree, Segoe UI, sans-serif !important; }`;
+        document.head.appendChild(style);
+      }
       window.addEventListener("message", async (event) => {
         const message = event.data;
         if (!message || typeof message !== "object") return;
-        if (message.type === "captainslog:state") {
+        if (message.type === "captainslog:state") { installPluginFont(message.payload);
           document.documentElement.style.setProperty("--theme-color", message.payload.theme.accentColor);
           document.documentElement.setAttribute("data-theme", message.payload.theme.themeColor);
           return;
@@ -147,7 +156,6 @@
               reject(new Error(message.error));
             }
           }
-
           window.addEventListener("message", onMessage);
           window.parent.postMessage({ type: "captainslog:call", requestId, method, params }, "*");
         });

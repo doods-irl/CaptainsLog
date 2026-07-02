@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Whisper Dictation</title>
+    <style>
+      @font-face { font-family: Figtree; src: url("../figtree.ttf"); }
+      :root { --theme-color: tomato; --bg: #eef1f0; --panel: rgba(255,255,255,.8); --text: #151515; --muted: rgba(0,0,0,.62); --line: rgba(0,0,0,.12); }
+      html[data-theme="dark"] { --bg: #101213; --panel: rgba(255,255,255,.07); --text: #f2f2f2; --muted: rgba(255,255,255,.66); --line: rgba(255,255,255,.12); }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: linear-gradient(145deg, color-mix(in srgb, var(--theme-color) 12%, var(--bg)) 0%, var(--bg) 70%); color: var(--text); font-family: Figtree, Segoe UI, sans-serif; }
+      *, *::before, *::after { box-sizing: border-box; font-family: Figtree, Segoe UI, sans-serif; }
+      #main { display: grid; grid-template-rows: auto 1fr; width: 100%; height: 100%; gap: 12px; padding: 18px; box-sizing: border-box; }
+      #header { display: flex; justify-content: space-between; gap: 12px; align-items: end; border-bottom: 3px solid var(--theme-color); padding-bottom: 8px; }
+      h1 { margin: 0; font-size: 20px; }
+      #status { color: var(--muted); font-size: 13px; text-align: right; }
+      #content { min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: 10px; }
+      .panel { display: grid; gap: 8px; padding: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+      .row { display: grid; grid-template-columns: minmax(130px, 210px) minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+      label { font-weight: 800; }
+      input, select { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 5px; padding: 8px; background: rgba(255,255,255,.72); color: var(--text); font: inherit; }
+      html[data-theme="dark"] input, html[data-theme="dark"] select { background: rgba(255,255,255,.08); }
+      button { appearance: none; border: 0; border-radius: 5px; padding: 8px 10px; background: var(--theme-color); color: white; font: inherit; font-weight: 800; cursor: pointer; }
+      button.secondary { background: rgba(0,0,0,.14); color: var(--text); }
+      html[data-theme="dark"] button.secondary { background: rgba(255,255,255,.14); }
+      button:disabled, input:disabled, select:disabled { opacity: .56; cursor: default; }
+      .progress { height: 8px; border-radius: 999px; background: rgba(0,0,0,.12); overflow: hidden; }
+      .progress span { display: block; width: 100%; height: 100%; background: var(--theme-color); animation: pulse 1.2s ease-in-out infinite; transform-origin: left; }
+      @keyframes pulse { 0%, 100% { transform: scaleX(.2); opacity: .55; } 50% { transform: scaleX(1); opacity: 1; } }
+      .muted { color: var(--muted); font-size: 13px; }
+      .bad { color: tomato; }
+      .good { color: seagreen; }
+      #content::-webkit-scrollbar { width: 8px; }
+      #content::-webkit-scrollbar-track { background: transparent; }
+      #content::-webkit-scrollbar-thumb { background: rgba(0,0,0,.18); border-radius: 999px; }
+    </style>
+    <script id="captainslog-plugin" type="application/json">
+      { "id": "whisper", "name": "Whisper Dictation", "command": "whisper", "aliases": ["dictate", "voice"], "version": "1.0.0", "description": "Hold a keyboard shortcut to transcribe speech into the active text field or notes.", "capabilities": ["settings", "dictation"], "defaultSize": "big", "hasSettings": true }
+    </script>
+  </head>
+  <body>
+    <div id="main">
+      <header id="header">
+        <h1>Whisper</h1>
+        <div id="status">Loading...</div>
+      </header>
+      <div id="content"></div>
+    </div>
+    <script>
+      const host = createHostBridge();
+      const dom = {
+        status: document.getElementById("status"),
+        content: document.getElementById("content"),
+      };
+      const state = {
+        context: null,
+        data: {},
+        status: { models: [], modelDir: "" },
+        ollamaModels: [],
+        captureTarget: null,
+        downloading: false,
+        preparingBackend: false,
+        downloadModel: "",
+        downloadPollId: null,
+        loaded: false,
+        lastSettingsMode: null,
+      };
+
+      host.onState((payload) => {
+        document.documentElement.style.setProperty("--theme-color", payload.theme.accentColor);
+        document.documentElement.setAttribute("data-theme", payload.theme.themeColor);
+      });
+      host.onContext((payload) => {
+        state.context = payload;
+        const settingsMode = isSettingsMode();
+        if (!state.loaded || state.lastSettingsMode !== settingsMode) {
+          state.lastSettingsMode = settingsMode;
+          load();
+        } else {
+          render();
+        }
+      });
+
+      window.parent.postMessage({ type: "captainslog:plugin-ready" }, "*");
+
+      async function load() {
+        try {
+          state.data = await host.call("plugin:get-data", { pluginId: "whisper" });
+          state.status = await host.call("whisper:status", {});
+          state.loaded = true;
+          render();
+          prepareBackendIfNeeded();
+        } catch (error) {
+          dom.status.textContent = error.message || String(error);
+        }
+      }
+
+      function render() {
+        const settingsMode = isSettingsMode();
+        dom.status.textContent = state.downloading
+          ? downloadStatusText()
+          : state.preparingBackend ? "Preparing Whisper..."
+          : settingsMode ? "Settings" : readinessText();
+        dom.content.innerHTML = "";
+        settingsMode ? renderSettings() : renderOverview();
+      }
+
+      function isSettingsMode() {
+        return (state.context?.args || "").includes("--settings");
+      }
+
+      function renderOverview() {
+        const panel = el("section", "panel");
+        panel.append(
+          text("div", "Hold your configured dictation shortcut to record, then release to transcribe into the active text field."),
+          text("div", "Use the note shortcut to send the transcription straight into the default notes category."),
+          text("div", readinessText(), readinessClass())
+        );
+        dom.content.appendChild(panel);
+      }
+
+      function renderSettings() {
+        const form = el("section", "panel");
+        if (state.downloading) {
+          const progress = el("div", "progress");
+          progress.appendChild(document.createElement("span"));
+          form.append(
+            text("div", downloadStatusText(), "muted"),
+            progress
+          );
+        }
+        if (state.preparingBackend) {
+          const progress = el("div", "progress");
+          progress.appendChild(document.createElement("span"));
+          form.append(
+            text("div", "Preparing Whisper backend...", "muted"),
+            progress
+          );
+        }
+
+        form.append(
+          row("Model", modelSelect(), downloadControls()),
+          row("Hold to paste", shortcutInput("holdShortcut", state.data.holdShortcut || "Control+Alt+KeyV"), captureButton("holdShortcut")),
+          row("Hold to note", shortcutInput("noteShortcut", state.data.noteShortcut || "Control+Alt+KeyN"), captureButton("noteShortcut")),
+          row("Ollama model", ollamaSelect(), refreshOllamaButton()),
+          row("Rewrite mode", improveSelect(), null)
+        );
+
+        const save = document.createElement("button");
+        save.textContent = "Save";
+        save.disabled = state.downloading;
+        save.addEventListener("click", saveSettings);
+        form.appendChild(save);
+        dom.content.appendChild(form);
+      }
+
+      function modelSelect() {
+        const select = document.createElement("select");
+        select.id = "modelPath";
+        select.appendChild(option("", "Select a downloaded model"));
+        (state.status.models || []).forEach((model) => {
+          select.appendChild(option(model.path, model.name));
+        });
+        const selected = state.data.modelPath || "";
+        if (selected && !(state.status.models || []).some((model) => model.path === selected)) {
+          select.appendChild(option(selected, selected));
+        }
+        select.value = selected;
+        select.disabled = state.downloading;
+        return select;
+      }
+
+      function refreshOllamaButton() {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "secondary";
+        button.textContent = "Refresh";
+        button.addEventListener("click", refreshOllamaModels);
+        return button;
+      }
+
+      function downloadControls() {
+        const wrap = document.createElement("div");
+        wrap.style.display = "flex";
+        wrap.style.gap = "6px";
+        const select = document.createElement("select");
+        ["tiny", "base", "small", "medium"].forEach((name) => select.appendChild(option(name, name)));
+        select.disabled = state.downloading;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = state.downloading ? "Downloading" : "Download";
+        button.disabled = state.downloading;
+        button.addEventListener("click", () => downloadModel(select.value));
+        wrap.append(select, button);
+        return wrap;
+      }
+
+      function shortcutInput(id, value) {
+        const input = document.createElement("input");
+        input.id = id;
+        input.value = value;
+        input.readOnly = true;
+        return input;
+      }
+
+      function input(id, value, placeholder) {
+        const input = document.createElement("input");
+        input.id = id;
+        input.value = value;
+        input.placeholder = placeholder;
+        return input;
+      }
+
+      function captureButton(id) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "secondary";
+        button.textContent = "Record";
+        button.addEventListener("click", () => {
+          state.captureTarget = id;
+          dom.status.textContent = "Press the shortcut now";
+        });
+        return button;
+      }
+
+      function ollamaSelect() {
+        const select = document.createElement("select");
+        select.id = "ollamaModel";
+        select.appendChild(option("", "No Ollama rewrite"));
+        state.ollamaModels.forEach((model) => select.appendChild(option(model, model)));
+        const selected = state.data.ollamaModel || "";
+        if (selected && !state.ollamaModels.includes(selected)) {
+          select.appendChild(option(selected, selected));
+        }
+        select.value = selected;
+        return select;
+      }
+
+      function improveSelect() {
+        const select = document.createElement("select");
+        select.id = "improveMode";
+        select.appendChild(option("punctuation", "Improve punctuation"));
+        select.appendChild(option("expand", "Expand on note"));
+        select.value = state.data.improveMode || "punctuation";
+        return select;
+      }
+
+      async function downloadModel(model) {
+        if (state.downloading) return;
+        state.downloading = true;
+        state.downloadModel = model;
+        render();
+        startDownloadPolling();
+        try {
+          const result = await host.call("whisper:download-model", { model });
+          state.data.modelPath = result.path;
+          state.status = await host.call("whisper:status", {});
+          await persistSettings({ modelPath: result.path });
+          await prepareBackendIfNeeded();
+          render();
+        } catch (error) {
+          dom.status.textContent = error.message || String(error);
+        } finally {
+          stopDownloadPolling();
+          state.downloading = false;
+          state.downloadModel = "";
+          render();
+        }
+      }
+
+      async function prepareBackendIfNeeded() {
+        const hasModel = Boolean((state.data.modelPath || "").trim());
+        const hasBackend = Boolean((state.data.whisperCommand || state.status.engine?.path || "").trim());
+        if (!hasModel || hasBackend || state.preparingBackend) return;
+
+        state.preparingBackend = true;
+        render();
+        try {
+          const result = await host.call("whisper:download-engine", {});
+          state.status = await host.call("whisper:status", {});
+          await persistSettings({ whisperCommand: result.path });
+        } catch (error) {
+          dom.status.textContent = error.message || String(error);
+        } finally {
+          state.preparingBackend = false;
+          render();
+        }
+      }
+
+      function startDownloadPolling() {
+        stopDownloadPolling();
+        state.downloadPollId = window.setInterval(async () => {
+          try {
+            state.status = await host.call("whisper:status", {});
+            render();
+          } catch {
+            stopDownloadPolling();
+          }
+        }, 1000);
+      }
+
+      function stopDownloadPolling() {
+        if (state.downloadPollId) {
+          window.clearInterval(state.downloadPollId);
+          state.downloadPollId = null;
+        }
+      }
+
+      function downloadStatusText() {
+        const active = (state.status.downloads || []).find((download) =>
+          download.name === `ggml-${state.downloadModel}`
+        ) || (state.status.downloads || [])[0];
+        const suffix = active?.bytes ? ` (${formatBytes(active.bytes)})` : "";
+        return `Downloading ${state.downloadModel || "model"}${suffix}...`;
+      }
+
+      function formatBytes(bytes) {
+        if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+        if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+        if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${bytes} B`;
+      }
+
+      async function refreshOllamaModels() {
+        dom.status.textContent = "Checking Ollama...";
+        try {
+          state.ollamaModels = await host.call("whisper:list-ollama-models", {});
+          render();
+        } catch (error) {
+          dom.status.textContent = error.message || String(error);
+        }
+      }
+
+      async function saveSettings() {
+        try {
+          await persistSettings();
+          dom.status.textContent = "Saved";
+        } catch (error) {
+          dom.status.textContent = error.message || String(error);
+        }
+      }
+
+      async function persistSettings(overrides = {}) {
+        const settings = {
+          ...state.data,
+          modelPath: valueOf("modelPath") || state.data.modelPath || "",
+          whisperCommand: state.data.whisperCommand || state.status.engine?.path || "",
+          holdShortcut: valueOf("holdShortcut") || state.data.holdShortcut || "Control+Alt+KeyV",
+          noteShortcut: valueOf("noteShortcut") || state.data.noteShortcut || "Control+Alt+KeyN",
+          ollamaModel: valueOf("ollamaModel") || state.data.ollamaModel || "",
+          improveMode: valueOf("improveMode") || state.data.improveMode || "punctuation",
+          ...overrides,
+        };
+        await host.call("whisper:configure", { settings });
+        state.data = settings;
+        return settings;
+      }
+
+      window.addEventListener("keydown", (event) => {
+        if (!state.captureTarget) return;
+        event.preventDefault();
+        const shortcut = shortcutFromEvent(event);
+        if (!shortcut) return;
+        document.getElementById(state.captureTarget).value = shortcut;
+        state.captureTarget = null;
+        dom.status.textContent = "Shortcut recorded";
+      });
+
+      function shortcutFromEvent(event) {
+        const parts = [];
+        if (event.ctrlKey) parts.push("Control");
+        if (event.altKey) parts.push("Alt");
+        if (event.shiftKey) parts.push("Shift");
+        if (event.metaKey) parts.push("Meta");
+        if (["ControlLeft", "ControlRight", "AltLeft", "AltRight", "ShiftLeft", "ShiftRight", "MetaLeft", "MetaRight"].includes(event.code)) {
+          return "";
+        }
+        parts.push(event.code);
+        return parts.join("+");
+      }
+
+      function readinessText() {
+        if (!state.status) return "Loading...";
+        if (!(state.data.modelPath || "").trim()) return "Download or select a Whisper model.";
+        if (state.preparingBackend) return "Preparing Whisper...";
+        return "Ready";
+      }
+
+      function readinessClass() {
+        return readinessText() === "Ready" ? "good" : "bad";
+      }
+
+      function valueOf(id) {
+        return document.getElementById(id)?.value || "";
+      }
+
+      function row(labelText, control, trailing) {
+        const row = el("div", "row");
+        const label = document.createElement("label");
+        label.textContent = labelText;
+        row.append(label, control, trailing || document.createElement("span"));
+        return row;
+      }
+
+      function option(value, label) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        return option;
+      }
+
+      function text(tag, content, className = "muted") {
+        const node = el(tag, className);
+        node.textContent = content;
+        return node;
+      }
+
+      function el(tag, className) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        return node;
+      }
+
+      function installPluginFont(payload) {
+        if (!payload?.fontAsset || document.getElementById("captainslog-figtree-font")) return;
+        const style = document.createElement("style");
+        style.id = "captainslog-figtree-font";
+        style.textContent = `@font-face { font-family: Figtree; src: url("${payload.fontAsset}") format("truetype"); font-weight: 100 900; font-style: normal; font-display: swap; } *, *::before, *::after { font-family: Figtree, Segoe UI, sans-serif !important; }`;
+        document.head.appendChild(style);
+      }
+      function createHostBridge() {
+        let requestId = 0;
+        const pending = new Map();
+        const listeners = { state: [], context: [] };
+        window.addEventListener("message", (event) => {
+          const message = event.data;
+          if (!message || typeof message !== "object") return;
+          if (message.type === "captainslog:state") { installPluginFont(message.payload); listeners.state.forEach((listener) => listener(message.payload)); return; }
+          if (message.type === "captainslog:plugin-context") { listeners.context.forEach((listener) => listener(message.payload)); return; }
+          if (message.type === "captainslog:response") {
+            const resolver = pending.get(message.requestId);
+            if (!resolver) return;
+            pending.delete(message.requestId);
+            message.success ? resolver.resolve(message.result) : resolver.reject(new Error(message.error));
+          }
+        });
+        return {
+          call(method, params) {
+            requestId += 1;
+            return new Promise((resolve, reject) => {
+              pending.set(requestId, { resolve, reject });
+              window.parent.postMessage({ type: "captainslog:call", requestId, method, params }, "*");
+            });
+          },
+          onState(listener) { listeners.state.push(listener); },
+          onContext(listener) { listeners.context.push(listener); },
+        };
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,66 @@
+name: Build installer
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-installer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-installer:
+    name: Windows installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Reset rolling release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view captains-log-latest 1>$null 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release delete captains-log-latest --yes --cleanup-tag
+          } else {
+            Write-Host "No existing rolling release to replace."
+          }
+
+      - name: Build and upload installer
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: captains-log-latest
+          releaseName: Captain's Log Latest Installer
+          releaseBody: |
+            Automated Windows installer built from the latest commit on `${{ github.ref_name }}`.
+
+            Commit: ${{ github.sha }}
+          releaseDraft: false
+          prerelease: true
+          releaseCommitish: ${{ github.sha }}
+          tauriScript: npm run tauri
+          args: --bundles msi
+          releaseAssetNamePattern: Captain-Log-[version]-[platform]-[arch][ext]

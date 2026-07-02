@@ -1,21 +1,23 @@
 @font-face {
-    font-family: 'HKGrotesk';
-    src: url('assets/HKGrotesk-Regular.ttf');
+    font-family: 'Figtree';
+    src: url('assets/figtree.ttf');
 }
 
 body {
     margin: 0;
-    font-family: HKGrotesk;
+    min-height: 100vh;
+    font-family: Figtree;
     font-size: x-large;
     background-color: #FFF;
     display: flex;
     justify-content: center;
     align-items: center;
 }
+      *, *::before, *::after { font-family: Figtree, Segoe UI, sans-serif; }
 
 #main {
     width: 100%;
-    height: 100%;
+    min-height: 100vh;
     background-color: #CCC;
     box-sizing: border-box;
 }
@@ -43,7 +45,7 @@ body {
 
 #tip {
     margin: 10px;
-    font-family: HKGrotesk;
+    font-family: Figtree;
     font-size: x-large;
     border: none;
     outline: none;
@@ -61,7 +63,7 @@ body {
 }
 
 #textbox {
-    font-family: HKGrotesk;
+    font-family: Figtree;
     font-size: x-large;
     width: 100%;
     height: 60px;
@@ -71,7 +73,7 @@ body {
 }
 
 #browse-button, #submit-button {
-    font-family: HKGrotesk;
+    font-family: Figtree;
     font-size: large;
     font-weight: 600;
     color: white;

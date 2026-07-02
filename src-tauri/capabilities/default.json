@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default permissions for Captain's Log windows",
+  "windows": ["main", "setup", "settings", "tutorial", "recording-status"],
+  "permissions": [
+    "core:default",
+    "dialog:default"
+  ]
+}

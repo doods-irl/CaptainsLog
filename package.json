@@ -2,42 +2,16 @@
   "name": "captainslog",
   "version": "1.0.0",
   "description": "An out of the way app for quickly logging ideas",
-  "main": "index.js",
   "scripts": {
-    "start": "electron .",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "start": "tauri dev",
+    "dev": "tauri dev",
+    "dist": "tauri build",
+    "tauri": "tauri"
   },
   "keywords": [],
   "author": "Max Vinten",
   "license": "ISC",
   "devDependencies": {
-    "electron": "^29.1.2",
-    "electron-builder": "^24.13.3"
-  },
-  "build": {
-    "appId": "com.maxv.captainslog",
-    "productName": "Captain's Log",
-    "win": {
-      "icon": "favicon.ico",
-      "target": "msi"
-    },
-    "mac": {
-      "icon": "icon.icns",
-      "target": [
-        "dmg",
-        "zip"
-      ]
-    },
-    "files": [
-      "**/*",
-      "!**/*.ts",
-      "!*.code-workspace",
-      "!**/*.js.map",
-      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
-      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
-      "!**/node_modules/*.d.ts",
-      "!**/node_modules/.bin"
-    ]
+    "@tauri-apps/cli": "^2.0.0"
   }
 }

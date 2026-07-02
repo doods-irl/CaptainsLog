@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recording</title>
+    <style>
+      @font-face { font-family: Figtree; src: url("assets/figtree.ttf"); }
+      html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        font-family: Figtree, Segoe UI, sans-serif;
+      }
+      *, *::before, *::after { box-sizing: border-box; font-family: Figtree, Segoe UI, sans-serif; }
+      #main {
+        display: grid;
+        place-items: center;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(18, 18, 18, .88);
+        border: 2px solid rgba(255, 255, 255, .16);
+        border-radius: 16px;
+        box-shadow: 0 10px 34px rgba(0, 0, 0, .28);
+      }
+      #icon {
+        font-size: 46px;
+        line-height: 1;
+        transform-origin: center;
+      }
+      html[data-status="recording"] #icon { animation: listen 1s ease-in-out infinite; }
+      html[data-status="processing"] #icon { animation: think 1.1s ease-in-out infinite; }
+      html[data-status="done"] #main { background: rgba(25, 120, 74, .92); }
+      @keyframes listen {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.12); }
+      }
+      @keyframes think {
+        0%, 100% { transform: rotate(-5deg); }
+        50% { transform: rotate(5deg); }
+      }
+    </style>
+  </head>
+  <body>
+    <main id="main">
+      <div id="icon">👂</div>
+    </main>
+    <script>
+      const icons = {
+        recording: "👂",
+        processing: "🤔",
+        done: "✅",
+        error: "!",
+      };
+      const icon = document.getElementById("icon");
+
+      function setStatus(status) {
+        const normalized = icons[status] ? status : "recording";
+        document.documentElement.dataset.status = normalized;
+        icon.textContent = icons[normalized];
+      }
+
+      setStatus(new URLSearchParams(window.location.search).get("status") || "recording");
+
+      if (window.__TAURI__?.event?.listen) {
+        window.__TAURI__.event.listen("recording-status", (event) => {
+          setStatus(event.payload?.status || "recording");
+        });
+      }
+    </script>
+  </body>
+</html>
