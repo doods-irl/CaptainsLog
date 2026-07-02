@@ -65,7 +65,7 @@ jobs:
 
             Commit: ${{ github.sha }}
           releaseDraft: false
-          prerelease: true
+          prerelease: false
           releaseCommitish: ${{ github.sha }}
           tauriScript: npm run tauri
           args: --bundles msi
